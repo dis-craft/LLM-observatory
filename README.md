@@ -1,67 +1,47 @@
-# LLM Observatory
+# Ollama Observatory (Windows starter)
 
-A local observability and experimentation dashboard for language models served by [Ollama](https://ollama.com/). The project is intended as a learning and prototyping tool for **Performance and Reliability Analysis of Quantized Language Models on Edge Hardware**.
+A local Streamlit dashboard for exploring Ollama-served language models while observing system and NVIDIA GPU telemetry. It is intended as a learning and prototyping tool for **Performance and Reliability Analysis of Quantized Language Models on Edge Hardware**.
 
-It brings live system telemetry, local-model chat, inference statistics, model metadata, and local Ollama configuration inspection into one browser-based interface.
-
-> **Status:** Research prototype. It has not yet been validated against every Windows, Ollama, or NVIDIA driver configuration. Treat telemetry as observational and verify important measurements independently.
+> **Status:** Research prototype. It has not been validated against every Windows/Ollama/NVIDIA driver combination. Verify important measurements independently.
 
 ## Features
 
-### Live telemetry
-- CPU utilization and system RAM usage.
-- NVIDIA GPU utilization, VRAM usage, temperature, and power draw when reported by the installed driver.
-- Ollama process/model allocation information where available.
-- Periodically refreshed charts for exploring resource changes while a model is loaded or generating.
+- **Live telemetry:** CPU and RAM usage; NVIDIA GPU utilization, VRAM, temperature and power when supported; Ollama-reported model allocation and processor placement.
+- **Chat and experiments:** stream responses from Ollama; adjust the system prompt, temperature, context length and output-token limit; inspect prompt/generation speed and request metrics returned by Ollama.
+- **Model inspector:** inspect model family, parameter metadata, quantization level, architecture metadata, Modelfile, template and available defaults.
+- **Files and logs:** inspect selected readable configuration/log files and relevant environment values in standard Ollama locations.
+- **Export:** download telemetry history and per-request metric tables as CSV.
 
-### Chat and inference experiments
-- Chat with models already installed in Ollama.
-- Configure the system prompt and inference options exposed by the app, such as temperature, context length, and output-token limit.
-- View per-request timing and token statistics returned by Ollama, where available, including prompt processing and generation throughput.
+## How it supports the research
 
-### Model inspector
-- Inspect model tags, architecture and parameter metadata, quantization information, and the model's effective Modelfile/template where exposed by Ollama.
-
-### Files and logs
-- Inspect selected Ollama model/configuration metadata and relevant logs in standard locations.
-- File visibility depends on the current Windows user permissions and the installed Ollama version.
-
-## How this helps the research
-
-A quantized-LLM study needs to relate the numerical representation of a model to both runtime efficiency and output quality. LLM Observatory helps with the exploratory stage:
-
-1. Load different quantized variants of the same base model.
-2. Run comparable prompts and workloads.
-3. Observe memory, utilization, and response timing while the requests execute.
-4. Inspect model metadata to verify which variant is loaded.
-5. Use observations to identify follow-up experiments and hypotheses.
-
-The dashboard is an **instrumentation and exploration tool**, not by itself a complete benchmark suite or a hallucination evaluator.
+Use one model at multiple quantization levels, keep prompts and runtime settings controlled, and observe how model size, memory, inference timing and output behaviour change. Observatory helps explore and debug the system; it is not itself a complete benchmark or a validated hallucination evaluator.
 
 ## Requirements
 
-- Windows 10/11.
-- Python 3.10 or newer.
-- [Ollama for Windows](https://ollama.com/download/windows), running locally.
-- An Ollama model already downloaded (for example, `qwen2.5:1.5b-instruct-q4_K_M`).
-- NVIDIA driver and `nvidia-smi` for NVIDIA GPU telemetry. Without it, GPU-specific readings may be unavailable.
-- Internet access for the first Python dependency installation if packages are not cached.
+- Windows 10/11
+- Python 3.10+ available through the Windows `py` launcher
+- [Ollama for Windows](https://ollama.com/download/windows), running locally
+- At least one Ollama model installed
+- NVIDIA driver and `nvidia-smi` for NVIDIA telemetry (CPU/RAM views can work without it)
+- Internet access for first-time Python dependency installation if packages are not cached
 
-## Quick start (Windows)
+## Quick start
 
-1. Install and start Ollama from the official download page.
-2. Download a model in PowerShell, for example:
+1. Install and launch Ollama.
+2. In PowerShell, pull a model, for example:
 
    ```powershell
    ollama pull qwen2.5:1.5b-instruct-q4_K_M
+   ollama list
+   ollama ps
+   nvidia-smi
    ```
 
-3. Download or clone this repository.
-4. Extract it, if downloaded as a ZIP.
-5. Double-click `start_dashboard.bat`. The launcher creates a local Python virtual environment, installs the requirements, and starts the dashboard.
-6. Open [http://localhost:8501](http://localhost:8501) if your browser does not open automatically.
+3. Clone/download this repository and open its folder.
+4. Double-click `start_dashboard.bat`.
+5. If a browser does not open, visit [http://localhost:8501](http://localhost:8501).
 
-If Windows blocks the batch file, open PowerShell in the project directory and run:
+The launcher creates `.venv`, installs `requirements.txt`, and starts Streamlit. Manual setup from PowerShell:
 
 ```powershell
 py -3 --version
@@ -71,78 +51,50 @@ py -3 -m venv .venv
 .venv\Scripts\python.exe -m streamlit run app.py
 ```
 
-If the `py` launcher is unavailable, install Python from [python.org](https://www.python.org/downloads/windows/) and ensure it is available on your PATH.
+If `py` is unavailable, install Python from [python.org](https://www.python.org/downloads/windows/) and enable the launcher/PATH options.
 
-## Verify local services
+## Suggested first experiment
 
-In PowerShell:
+1. Load a quantized Qwen model and view the Live telemetry tab.
+2. Send a short prompt and then a longer prompt; observe resource changes.
+3. Compare Q2_K and Q4_K_M variants using the same prompt, context length, output-token limit and temperature.
+4. Inspect the per-request metrics and export the CSV.
+5. Repeat trials and note warm-up conditions before drawing conclusions.
 
-```powershell
-ollama --version
-ollama list
-ollama ps
-nvidia-smi
-```
+Keep base model, prompt, tokenizer, runtime, hardware, context, output length and sampling settings constant wherever possible. Model-file size is not the same as runtime RAM/VRAM. Repeat experiments and report variability.
 
-Ollama commonly serves its local API at `http://localhost:11434`. The dashboard needs the local Ollama service to be reachable. Do not expose the Ollama API or the Streamlit dashboard to an untrusted network.
+## Important limitations
 
-## Research workflow suggestions
-
-For a controlled exploratory comparison:
-
-- Keep the base model, prompt set, context length, output limit, runtime, hardware, and sampling settings constant where possible.
-- Compare the same model at multiple available quantization formats, such as Q2_K, Q4_K_M, Q8_0, and F16 when supported.
-- Repeat each run and note warm-up conditions.
-- Distinguish prompt-processing throughput from token-generation throughput.
-- Record both model-file size and runtime RAM/VRAM; these are not the same measurement.
-- Treat GPU utilization and power as device-level observations. Background applications can affect them.
-- Validate any important results with a controlled benchmark or vendor profiling tools.
-
-## Current limitations
-
-- Device telemetry is sampled periodically; short bursts may occur between samples.
-- GPU metrics depend on NVIDIA driver/tool support and are not guaranteed on every device.
-- Device-wide GPU readings can include activity from applications other than Ollama.
-- Ollama-reported allocation and processor-split details are estimates/status information, not a per-layer memory breakdown.
-- System power or GPU power readings alone are not energy-per-inference measurements. A defensible energy measurement needs a defined measurement window and methodology.
-- The app does not trace individual GPU kernels or every internal tensor allocation. Use NVIDIA Nsight Systems/Compute when kernel-level profiling is needed.
-- The app does not provide a validated automatic factuality or hallucination benchmark; output-quality evaluation must be designed separately.
-- Configuration/log paths and available metadata may differ by Ollama version, operating system and installation mode.
+- Telemetry is sampled periodically; short bursts may be missed.
+- GPU metrics are device-wide and can include other applications. Fields depend on driver/GPU support.
+- Ollama-reported placement/allocation is not a per-layer memory trace.
+- GPU power draw is not energy per inference. Energy requires a defined measurement interval/method, ideally including a stated idle-power treatment.
+- The app does not trace individual GPU kernels or tensor allocations. Use NVIDIA Nsight Systems/Compute for deeper profiling.
+- The app does not implement a validated hallucination/quality benchmark. Design a separate fixed evaluation set and scoring methodology.
+- The telemetry chart and request metrics are session-oriented; they are not yet a full persistent experiment database.
+- Ollama paths and available metadata differ across versions and installation modes. File inspection is limited to selected text/config/log files and may not include all installation files.
 
 ## Troubleshooting
 
-**Ollama is unavailable**
-- Start Ollama and retry.
-- Run `ollama list` to confirm a model is installed.
-- Verify that the local Ollama API endpoint is reachable.
+**Ollama unavailable:** start Ollama and try `ollama list`. The default API endpoint is `http://127.0.0.1:11434`; `OLLAMA_HOST` can override it.
 
-**GPU readings are missing**
-- Run `nvidia-smi` in PowerShell.
-- Update/install the appropriate NVIDIA driver if necessary.
-- Some telemetry fields may be unavailable on particular laptop GPUs or driver modes.
+**GPU metrics unavailable:** run `nvidia-smi` in PowerShell and confirm the NVIDIA driver is installed. Some laptop telemetry fields may be unavailable.
 
-**A model is not fully on the GPU**
-- Run `ollama ps` and inspect the processor allocation.
-- The RTX 4050 Laptop GPU has limited VRAM; context/KV-cache and runtime overhead also consume memory.
-- Partial CPU/GPU placement can be expected for models or configurations that exceed available VRAM.
+**Model not fully on GPU:** check `ollama ps`. Available VRAM must accommodate model allocation, cache and runtime overhead; partial CPU/GPU placement can be normal on memory-constrained devices.
 
-**Installation fails**
-- Confirm Python 3.10+ is installed.
-- Re-run the launcher's dependency installation step and inspect the terminal output.
-
-## Project layout
-
-The main files are:
-
-- `app.py` — Streamlit dashboard.
-- `requirements.txt` — Python dependencies.
-- `start_dashboard.bat` — Windows setup and launch helper.
-- `README.md` — documentation.
+**Dependency/startup failure:** check Python 3.10+ and inspect the console output from `start_dashboard.bat`.
 
 ## Privacy and security
 
-The app is intended for local use. Prompts sent through the dashboard are passed to the configured local Ollama service. Keep the dashboard bound to localhost unless you understand and configure the access controls appropriate for your environment. Inspect local logs and configuration before sharing them; they may contain paths or other environment details.
+Designed for local use. Chat prompts are sent to the configured local Ollama service. Keep Streamlit bound to localhost unless you have deliberately configured secure access. Review logs/environment data before sharing them because they may contain local paths or other environment information.
+
+## Project layout
+
+- `app.py` — Streamlit dashboard
+- `requirements.txt` — Python dependencies
+- `start_dashboard.bat` — Windows setup/launcher
+- `README.md` — this guide
 
 ## License
 
-No license is implied by this README. Add an explicit `LICENSE` file if you intend to permit reuse or redistribution.
+No license is implied. Add an explicit `LICENSE` file if reuse/redistribution should be permitted.
