@@ -1,100 +1,124 @@
-# Ollama Observatory (Windows starter)
+# LLM Observatory
 
-A local Streamlit dashboard for exploring Ollama-served language models while observing system and NVIDIA GPU telemetry. It is intended as a learning and prototyping tool for **Performance and Reliability Analysis of Quantized Language Models on Edge Hardware**.
+A local-first research workspace for **Performance and Reliability Analysis of Quantized Language Models on Edge Hardware**. It combines a purpose-built HTML/CSS/JavaScript interface with a small FastAPI backend for local Ollama requests, device telemetry, reproducible performance experiments, and optional external evaluation tools.
 
-> **Status:** Research prototype. It has not been validated against every Windows/Ollama/NVIDIA driver combination. Verify important measurements independently.
+> **Status:** Research prototype. It has not been validated on every Windows/Ollama/NVIDIA configuration. Treat measurements according to the scope notes below; do not present them as model-only measurements unless they are genuinely isolated.
 
-## Features
+## What it does
 
-- **Live telemetry:** CPU and RAM usage; NVIDIA GPU utilization, VRAM, temperature and power when supported; Ollama-reported model allocation and processor placement.
-- **Chat and experiments:** stream responses from Ollama; adjust the system prompt, temperature, context length and output-token limit; inspect prompt/generation speed and request metrics returned by Ollama.
-- **Model inspector:** inspect model family, parameter metadata, quantization level, architecture metadata, Modelfile, template and available defaults.
-- **Files and logs:** inspect selected readable configuration/log files and relevant environment values in standard Ollama locations.
-- **Export:** download telemetry history and per-request metric tables as CSV.
-
-## How it supports the research
-
-Use one model at multiple quantization levels, keep prompts and runtime settings controlled, and observe how model size, memory, inference timing and output behaviour change. Observatory helps explore and debug the system; it is not itself a complete benchmark or a validated hallucination evaluator.
+- **Model registry:** lists locally installed Ollama models and displays file size, family, parameter metadata and the quantization level reported by Ollama.
+- **Hardware telemetry:** samples system CPU/RAM, NVIDIA GPU utilization, VRAM, temperature, clocks and instantaneous power where supported; reports Ollama process RSS/CPU and the model allocation returned by Ollama.
+- **Performance lab:** runs serial, repeatable prompt trials against one or more installed model variants. Records client-measured time to first token and end-to-end stream latency, plus Ollama's prompt/generation token counts and durations. Summarizes median/mean latency, p95 latency and token throughput.
+- **Quality evaluation:** invokes [Promptfoo](https://www.promptfoo.dev/docs/providers/ollama/) when Promptfoo or npx is available. The initial UI supports simple contains, equals, and not-contains assertions against a fixed list of prompts.
+- **Standard benchmarks:** optionally invokes the LM Evaluation Harness through Ollama's OpenAI-compatible chat endpoint for selected generation tasks where the installed task and harness support that interface.
+- **External results:** imports CSV/JSON outputs, including llama-bench results. Imported results remain labeled separately because different runtimes and measurement protocols are not automatically comparable.
+- **Persistent history:** saves experiment configuration, progress and results to local SQLite under data/observatory.sqlite3. Per-run files are stored under data/runs/.
+- **Export:** exports the saved experiment history as JSON.
 
 ## Requirements
 
 - Windows 10/11
-- Python 3.10+ available through the Windows `py` launcher
-- [Ollama for Windows](https://ollama.com/download/windows), running locally
-- At least one Ollama model installed
-- NVIDIA driver and `nvidia-smi` for NVIDIA telemetry (CPU/RAM views can work without it)
-- Internet access for first-time Python dependency installation if packages are not cached
+- Python 3.10 or newer available through the Windows py launcher
+- [Ollama for Windows](https://ollama.com/download/windows), running locally, with at least one model installed
+- NVIDIA driver and nvidia-smi for NVIDIA telemetry (CPU/RAM features still work without NVIDIA telemetry)
+- Node.js/npm for Promptfoo (optional)
+- LM Evaluation Harness (optional; has additional dependencies)
+- llama-bench and NVIDIA Nsight Systems (optional external tools)
 
-## Quick start
+## Start the dashboard
 
-1. Install and launch Ollama.
-2. In PowerShell, pull a model, for example:
+1. Start Ollama and verify it is working in PowerShell using the command: ollama list.
+2. Clone/download this repository and open the project folder.
+3. Double-click start_dashboard.bat. The launcher creates .venv, installs the dashboard dependencies and starts the local web server.
+4. Open http://127.0.0.1:8501 if your browser does not open automatically.
 
-   ```powershell
-   ollama pull qwen2.5:1.5b-instruct-q4_K_M
-   ollama list
-   ollama ps
-   nvidia-smi
-   ```
+Manual setup from PowerShell:
 
-3. Clone/download this repository and open its folder.
-4. Double-click `start_dashboard.bat`.
-5. If a browser does not open, visit [http://localhost:8501](http://localhost:8501).
+    py -3 --version
+    py -3 -m venv .venv
+    .venv\Scripts\python.exe -m pip install --upgrade pip
+    .venv\Scripts\python.exe -m pip install -r requirements.txt
+    .venv\Scripts\python.exe -m uvicorn app:app --host 127.0.0.1 --port 8501
 
-The launcher creates `.venv`, installs `requirements.txt`, and starts Streamlit. Manual setup from PowerShell:
+The server binds to loopback (127.0.0.1) by default. Do not bind it to all network interfaces unless you have intentionally configured appropriate access controls. OLLAMA_HOST can override the local Ollama endpoint, for example http://127.0.0.1:11434.
 
-```powershell
-py -3 --version
-py -3 -m venv .venv
-.venv\Scripts\python.exe -m pip install --upgrade pip
-.venv\Scripts\python.exe -m pip install -r requirements.txt
-.venv\Scripts\python.exe -m streamlit run app.py
-```
+## Run the first controlled comparison
 
-If `py` is unavailable, install Python from [python.org](https://www.python.org/downloads/windows/) and enable the launcher/PATH options.
+1. In Ollama, install the quantized variants you intend to compare. For example, test Qwen2.5-1.5B-Instruct Q2_K and Q4_K_M.
+2. Open **Performance lab** and select those installed variants.
+3. Use the same fixed prompts, system prompt, temperature, context length and output-token cap.
+4. Keep trials serial, leave warm-up requests out of the measured trials, and repeat each condition.
+5. Save the run and inspect its result record. Review the interpretation notes before using numbers in a report.
+6. Open **Quality evaluation** and run the same evaluation cases through Promptfoo separately, so quality evaluation does not compete for the GPU during the performance run.
 
-## Suggested first experiment
+The built-in pilot prompts are examples, not a validated research dataset. Replace them with documented tasks and a reference-backed scoring protocol before making claims about factual reliability or hallucinations.
 
-1. Load a quantized Qwen model and view the Live telemetry tab.
-2. Send a short prompt and then a longer prompt; observe resource changes.
-3. Compare Q2_K and Q4_K_M variants using the same prompt, context length, output-token limit and temperature.
-4. Inspect the per-request metrics and export the CSV.
-5. Repeat trials and note warm-up conditions before drawing conclusions.
+## Optional tools
 
-Keep base model, prompt, tokenizer, runtime, hardware, context, output length and sampling settings constant wherever possible. Model-file size is not the same as runtime RAM/VRAM. Repeat experiments and report variability.
+### Promptfoo quality checks
 
-## Important limitations
+Install Node.js, then install Promptfoo (or let the application use npx if it is available):
 
-- Telemetry is sampled periodically; short bursts may be missed.
-- GPU metrics are device-wide and can include other applications. Fields depend on driver/GPU support.
-- Ollama-reported placement/allocation is not a per-layer memory trace.
-- GPU power draw is not energy per inference. Energy requires a defined measurement interval/method, ideally including a stated idle-power treatment.
-- The app does not trace individual GPU kernels or tensor allocations. Use NVIDIA Nsight Systems/Compute for deeper profiling.
-- The app does not implement a validated hallucination/quality benchmark. Design a separate fixed evaluation set and scoring methodology.
-- The telemetry chart and request metrics are session-oriented; they are not yet a full persistent experiment database.
-- Ollama paths and available metadata differ across versions and installation modes. File inspection is limited to selected text/config/log files and may not include all installation files.
+    npm install -g promptfoo
+    promptfoo --version
 
-## Troubleshooting
+Open **Quality evaluation** to choose installed Ollama model tags and define cases as one per line:
 
-**Ollama unavailable:** start Ollama and try `ollama list`. The default API endpoint is `http://127.0.0.1:11434`; `OLLAMA_HOST` can override it.
+    What is the capital of Japan? || Tokyo
+    How many sides does a triangle have? || three
+    What is 7 multiplied by 8? || 56
 
-**GPU metrics unavailable:** run `nvidia-smi` in PowerShell and confirm the NVIDIA driver is installed. Some laptop telemetry fields may be unavailable.
+Choose contains, equals, or not-contains. These assertions are useful for basic regression checks, but they are **not a validated hallucination metric**. Phrase matching can reject a correct paraphrase or pass an answer that contains the expected words plus incorrect claims. Use a broader fixed evaluation set and validate factuality scoring against trusted references or human review.
 
-**Model not fully on GPU:** check `ollama ps`. Available VRAM must accommodate model allocation, cache and runtime overhead; partial CPU/GPU placement can be normal on memory-constrained devices.
+### LM Evaluation Harness
 
-**Dependency/startup failure:** check Python 3.10+ and inspect the console output from `start_dashboard.bat`.
+Install into the same Python environment in which the dashboard server runs:
 
-## Privacy and security
+    .venv\Scripts\python.exe -m pip install "lm_eval[api]"
 
-Designed for local use. Chat prompts are sent to the configured local Ollama service. Keep Streamlit bound to localhost unless you have deliberately configured secure access. Review logs/environment data before sharing them because they may contain local paths or other environment information.
+Availability and dependency compatibility vary by version. The app uses the OpenAI-compatible chat-completions API. That adapter is generation-oriented and does not provide likelihood/log-probability scoring for every task. Check the chosen task's output type and the harness documentation before interpreting results. Large evaluation suites can take a long time; start with a low limit.
+
+### llama-bench
+
+llama-bench is an independent llama.cpp benchmark. It needs a compatible GGUF file and a llama.cpp build. Its metrics can be imported from CSV/JSON under **Results & reports**. Label these results with the backend and build options. Do not treat llama.cpp measurements as directly equivalent to Ollama measurements without controlling the runtime and configuration differences.
+
+Documentation: https://github.com/ggml-org/llama.cpp/tree/master/tools/llama-bench
+
+### NVIDIA Nsight Systems
+
+Nsight Systems is an optional advanced profiler for investigating CPU/GPU execution timelines and potential bottlenecks. The dashboard detects whether nsys is on PATH but does not automatically launch a profiler session. Profiling can alter performance and should normally be conducted separately from clean benchmark trials.
+
+Documentation: https://developer.nvidia.com/nsight-systems
+
+## Measurement definitions and limitations
+
+- **Time to first token (TTFT):** client-side elapsed time from initiating the local streaming request until the first non-empty content chunk arrives. It includes local HTTP/runtime scheduling and, when applicable, model loading. It is not a kernel-only measurement.
+- **End-to-end request latency:** client-side time from sending the local streaming request until the stream is fully received.
+- **Prompt/generation throughput and durations:** derived from token counts and nanosecond duration fields returned by Ollama. These are runtime-reported timings; they are kept distinct from client-observed latency.
+- **CPU and RAM:** system-wide readings. Ollama-process CPU/RSS are process-level diagnostics, not clean per-model attribution.
+- **GPU utilization, VRAM, power and temperature:** readings from nvidia-smi; they are device-wide and can include Chrome, the desktop compositor and other GPU processes.
+- **Ollama model allocation:** the /api/ps size and size_vram fields are runtime-reported. The CPU-side value is a subtraction-based estimate, not a measured per-layer or weight-only allocation.
+- **Peak sampled memory:** the sampler can miss brief peaks, especially for short requests. The number of samples that fell inside a request is recorded.
+- **Energy:** not currently measured per request. A single power reading in watts is not energy. Energy requires integrating power over a defined interval, ideally with a documented idle baseline; use a suitable external meter for whole-laptop energy claims.
+- **Memory bandwidth, GPU kernel time and isolated process GPU power:** not measured directly by this dashboard.
+- **Reliability:** simple assertions are only preliminary output checks. They do not determine a general hallucination rate.
+- **Instrumentation overhead:** telemetry sampling and the dashboard consume some resources; its sampling interval and observer overhead should be documented.
+- **Background activity:** minimize unrelated workloads and record their presence. A device-wide GPU increase cannot automatically be attributed exclusively to the LLM.
+
+## Data and privacy
+
+Prompts are sent to the configured local Ollama endpoint. Experiment records and generated artifacts are saved locally under data/. Review files before sharing them: prompts, outputs, model names and local filesystem paths may be research-sensitive. The server binds to loopback by default and does not include authentication intended for network exposure.
 
 ## Project layout
 
-- `app.py` — Streamlit dashboard
-- `requirements.txt` — Python dependencies
-- `start_dashboard.bat` — Windows setup/launcher
-- `README.md` — this guide
+- app.py — local FastAPI API, Ollama integration, telemetry collection, experiment execution and SQLite persistence
+- web/index.html — page structure
+- web/styles.css — responsive UI design system
+- web/app.js — navigation, charts, forms, polling and experiment result views
+- requirements.txt — Python dependencies
+- start_dashboard.bat — Windows launcher
+- data/ — local SQLite database and run artifacts (ignored by Git)
 
-## License
+## Research principle
 
-No license is implied. Add an explicit `LICENSE` file if reuse/redistribution should be permitted.
+The purpose of this tool is to make controlled comparisons easier, not to claim that lower quantization is always faster, lower-power or less reliable. Keep the base model, prompt dataset, runtime, context length, sampling settings, output budget and measurement method controlled; repeat trials; report variation; and describe the limits of each metric.

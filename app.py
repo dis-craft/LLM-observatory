@@ -1,417 +1,768 @@
 from __future__ import annotations
 
+import csv
 import json
+import math
 import os
+import shutil
+import sqlite3
+import statistics
 import subprocess
+import sys
+import threading
 import time
-from datetime import datetime
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import pandas as pd
 import psutil
 import requests
-import streamlit as st
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
 
-DEFAULT_HOST = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
-REQUEST_TIMEOUT = 3
+ROOT = Path(__file__).resolve().parent
+WEB_DIR = ROOT / "web"
+DATA_DIR = ROOT / "data"
+RUNS_DIR = DATA_DIR / "runs"
+DB_PATH = DATA_DIR / "observatory.sqlite3"
+for directory in (DATA_DIR, RUNS_DIR, WEB_DIR):
+    directory.mkdir(parents=True, exist_ok=True)
 
-st.set_page_config(
-    page_title="Ollama Observatory",
-    page_icon="🔬",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
+OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
+if not OLLAMA_HOST.startswith(("http://", "https://")):
+    OLLAMA_HOST = "http://" + OLLAMA_HOST
+REQUEST_TIMEOUT = 5
 
-st.markdown(
-    """
-    <style>
-      .block-container { padding-top: 1.3rem; }
-      [data-testid="stMetricValue"] { font-size: 1.55rem; }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-st.title("🔬 Ollama Observatory")
-st.caption("Local LLM experimentation · hardware telemetry · model inspection")
+app = FastAPI(title="LLM Observatory", version="2.0.0")
+app.mount("/assets", StaticFiles(directory=str(WEB_DIR)), name="assets")
 
 
-def ollama_get(path: str, params: dict[str, Any] | None = None) -> Any:
-    response = requests.get(f"{DEFAULT_HOST}{path}", params=params, timeout=REQUEST_TIMEOUT)
-    response.raise_for_status()
-    return response.json()
+def now_iso() -> str:
+    return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
 
 
-def ollama_post(path: str, payload: dict[str, Any], stream: bool = False):
-    return requests.post(
-        f"{DEFAULT_HOST}{path}", json=payload, timeout=(REQUEST_TIMEOUT, None), stream=stream
-    )
+def db_connect() -> sqlite3.Connection:
+    connection = sqlite3.connect(DB_PATH, timeout=10)
+    connection.row_factory = sqlite3.Row
+    return connection
 
 
-def run_command(args: list[str], timeout: int = 5) -> str | None:
-    try:
-        result = subprocess.run(
-            args, capture_output=True, text=True, timeout=timeout, check=False,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+def init_db() -> None:
+    with db_connect() as db:
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS experiments (
+                id TEXT PRIMARY KEY,
+                kind TEXT NOT NULL,
+                status TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                started_at TEXT,
+                finished_at TEXT,
+                progress REAL NOT NULL DEFAULT 0,
+                config_json TEXT NOT NULL,
+                result_json TEXT,
+                error TEXT
+            )
+            """
         )
-        if result.returncode == 0:
-            return result.stdout.strip()
-    except (OSError, subprocess.TimeoutExpired):
-        pass
-    return None
+        db.execute("CREATE INDEX IF NOT EXISTS idx_experiments_created ON experiments(created_at DESC)")
+
+
+init_db()
+
+
+def db_update(experiment_id: str, **values: Any) -> None:
+    if not values:
+        return
+    allowed = {"status", "started_at", "finished_at", "progress", "result_json", "error"}
+    fields = {key: value for key, value in values.items() if key in allowed}
+    if not fields:
+        return
+    assignments = ", ".join(key + " = ?" for key in fields)
+    with db_connect() as db:
+        db.execute(
+            "UPDATE experiments SET " + assignments + " WHERE id = ?",
+            [*fields.values(), experiment_id],
+        )
+
+
+def db_create(experiment_id: str, kind: str, config: dict[str, Any]) -> None:
+    with db_connect() as db:
+        db.execute(
+            "INSERT INTO experiments (id, kind, status, created_at, progress, config_json) VALUES (?, ?, ?, ?, ?, ?)",
+            (experiment_id, kind, "queued", now_iso(), 0, json.dumps(config)),
+        )
+
+
+def db_get(experiment_id: str) -> dict[str, Any] | None:
+    with db_connect() as db:
+        row = db.execute("SELECT * FROM experiments WHERE id = ?", (experiment_id,)).fetchone()
+    return row_to_dict(row) if row else None
+
+
+def row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+    item = dict(row)
+    for key in ("config_json", "result_json"):
+        raw = item.pop(key, None)
+        try:
+            item["config" if key == "config_json" else "result"] = json.loads(raw) if raw else None
+        except (TypeError, json.JSONDecodeError):
+            item["config" if key == "config_json" else "result"] = None
+    return item
+
+
+def db_list(limit: int = 100) -> list[dict[str, Any]]:
+    with db_connect() as db:
+        rows = db.execute("SELECT * FROM experiments ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+    return [row_to_dict(row) for row in rows]
+
+
+def ollama_get(path: str, timeout: float = REQUEST_TIMEOUT) -> Any:
+    try:
+        response = requests.get(OLLAMA_HOST + path, timeout=timeout)
+        response.raise_for_status()
+        return response.json()
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=503, detail="Cannot reach Ollama at " + OLLAMA_HOST + ". Start Ollama and try again. " + str(exc))
+
+
+def list_model_tags() -> list[dict[str, Any]]:
+    data = ollama_get("/api/tags")
+    items = []
+    for model in data.get("models", []):
+        details = model.get("details") or {}
+        items.append({
+            "name": model.get("name") or model.get("model") or "unknown",
+            "digest": model.get("digest", ""),
+            "size_bytes": model.get("size"),
+            "modified_at": model.get("modified_at"),
+            "family": details.get("family"),
+            "families": details.get("families") or [],
+            "parameter_size": details.get("parameter_size"),
+            "quantization_level": details.get("quantization_level"),
+            "format": details.get("format"),
+        })
+    return items
 
 
 def gpu_snapshot() -> dict[str, Any] | None:
-    query = [
+    command = [
         "nvidia-smi",
-        "--query-gpu=name,utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw,power.limit",
+        "--query-gpu=name,utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw,power.limit,clocks.current.sm",
         "--format=csv,noheader,nounits",
     ]
-    output = run_command(query, timeout=3)
-    if not output:
+    try:
+        completed = subprocess.run(command, capture_output=True, text=True, timeout=3, check=False,
+                                   creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except (OSError, subprocess.TimeoutExpired):
         return None
-    line = output.splitlines()[0]
-    fields = [part.strip() for part in line.split(",")]
-    if len(fields) < 7:
+    if completed.returncode != 0 or not completed.stdout.strip():
         return None
+    try:
+        row = next(csv.reader([completed.stdout.strip().splitlines()[0]], skipinitialspace=True))
+    except (csv.Error, IndexError):
+        return None
+    while len(row) < 8:
+        row.append("N/A")
 
-    def to_float(value: str) -> float | None:
+    def number(value: Any) -> float | None:
         try:
-            return float(value)
-        except (TypeError, ValueError):
+            return float(str(value).strip())
+        except (ValueError, TypeError):
             return None
 
     return {
-        "name": fields[0],
-        "gpu_util_pct": to_float(fields[1]),
-        "vram_used_mb": to_float(fields[2]),
-        "vram_total_mb": to_float(fields[3]),
-        "gpu_temp_c": to_float(fields[4]),
-        "gpu_power_w": to_float(fields[5]),
-        "gpu_power_limit_w": to_float(fields[6]),
+        "name": row[0].strip(),
+        "utilization_pct": number(row[1]),
+        "memory_used_mb": number(row[2]),
+        "memory_total_mb": number(row[3]),
+        "temperature_c": number(row[4]),
+        "power_w": number(row[5]),
+        "power_limit_w": number(row[6]),
+        "sm_clock_mhz": number(row[7]),
+        "scope": "device-wide; may include other applications",
     }
 
 
-def collect_snapshot() -> dict[str, Any]:
+def collect_telemetry() -> dict[str, Any]:
     vm = psutil.virtual_memory()
-    cpu_percent = psutil.cpu_percent(interval=None)
-    ollama_process_mb = 0.0
-    ollama_process_cpu_pct = 0.0
+    cpu_pct = psutil.cpu_percent(interval=None)
+    ollama_rss = 0
+    ollama_cpu = 0.0
+    process_count = 0
     for proc in psutil.process_iter(["name", "memory_info", "cpu_percent"]):
         try:
             name = (proc.info.get("name") or "").lower()
             if "ollama" in name:
+                process_count += 1
                 info = proc.info.get("memory_info")
                 if info:
-                    ollama_process_mb += info.rss / (1024**2)
-                ollama_process_cpu_pct += float(proc.info.get("cpu_percent") or 0.0)
+                    ollama_rss += info.rss
+                ollama_cpu += float(proc.info.get("cpu_percent") or 0)
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
             continue
-    gpu = gpu_snapshot()
-    loaded = None
+
+    loaded_models = []
+    total_allocated = 0
+    total_vram_allocated = 0
     try:
-        loaded = ollama_get("/api/ps")
+        response = requests.get(OLLAMA_HOST + "/api/ps", timeout=2)
+        response.raise_for_status()
+        loaded = response.json().get("models", [])
+        for model in loaded:
+            size = int(model.get("size") or 0)
+            vram = int(model.get("size_vram") or 0)
+            total_allocated += size
+            total_vram_allocated += vram
+            loaded_models.append({
+                "name": model.get("name") or model.get("model") or "unknown",
+                "size_bytes": size,
+                "vram_bytes": vram,
+                "cpu_side_estimate_bytes": max(size - vram, 0),
+                "scope": "runtime-reported allocation; CPU-side figure is an estimate",
+            })
     except requests.RequestException:
         pass
-    models = (loaded or {}).get("models", [])
-    allocated = sum(float(m.get("size", 0) or 0) for m in models)
-    vram_allocated = sum(float(m.get("size_vram", 0) or 0) for m in models)
-    placement = []
-    for model in models:
-        size = float(model.get("size", 0) or 0)
-        vram = float(model.get("size_vram", 0) or 0)
-        cpu_size = max(size - vram, 0)
-        if size > 0:
-            placement.append({
-                "name": model.get("name") or model.get("model") or "unknown",
-                "size_gb": size / (1024**3),
-                "vram_gb": vram / (1024**3),
-                "cpu_side_gb_estimate": cpu_size / (1024**3),
-                "expires_at": model.get("expires_at", ""),
-            })
+
     return {
-        "timestamp": datetime.now().isoformat(timespec="seconds"),
-        "cpu_util_pct": cpu_percent,
-        "ram_used_gb": vm.used / (1024**3),
-        "ram_total_gb": vm.total / (1024**3),
-        "ram_pct": vm.percent,
-        "ollama_process_mb": ollama_process_mb,
-        "ollama_process_cpu_pct": ollama_process_cpu_pct,
-        "ollama_allocated_gb": allocated / (1024**3),
-        "ollama_vram_allocated_gb": vram_allocated / (1024**3),
-        "gpu": gpu or {},
-        "loaded_models": placement,
+        "timestamp": now_iso(),
+        "cpu_utilization_pct": cpu_pct,
+        "ram_used_bytes": vm.used,
+        "ram_total_bytes": vm.total,
+        "ram_utilization_pct": vm.percent,
+        "ollama_process_rss_bytes": ollama_rss,
+        "ollama_process_cpu_pct": ollama_cpu,
+        "ollama_process_count": process_count,
+        "ollama_allocated_bytes": total_allocated,
+        "ollama_vram_allocated_bytes": total_vram_allocated,
+        "loaded_models": loaded_models,
+        "gpu": gpu_snapshot(),
+        "measurement_notes": [
+            "CPU, RAM and NVIDIA GPU readings are sampled device/system values, not isolated per-request consumption.",
+            "Ollama process RSS includes runtime overhead and is not equal to model-weight memory.",
+            "Ollama allocation values are reported by the runtime and are not a per-layer trace.",
+            "GPU power is instantaneous power; this app does not infer joules per request from a single reading.",
+        ],
     }
 
 
-def bytes_text(value: Any) -> str:
+def tool_status() -> dict[str, Any]:
+    promptfoo = shutil.which("promptfoo")
+    npx = shutil.which("npx") or shutil.which("npx.cmd")
+    lm_eval = shutil.which("lm_eval") or shutil.which("lm_eval.exe")
+    llama_bench = shutil.which("llama-bench") or shutil.which("llama-bench.exe")
+    nsys = shutil.which("nsys") or shutil.which("nsys.exe")
+    node = shutil.which("node") or shutil.which("node.exe")
     try:
-        value = float(value)
-    except (TypeError, ValueError):
-        return "—"
-    units = ["B", "KB", "MB", "GB", "TB"]
-    for unit in units:
-        if abs(value) < 1024 or unit == units[-1]:
-            return f"{value:.2f} {unit}"
-        value /= 1024
-    return f"{value:.2f} TB"
-
-
-def format_seconds_ns(ns: Any) -> str:
+        requests.get(OLLAMA_HOST + "/api/version", timeout=2).raise_for_status()
+        ollama_ok = True
+        version_data = requests.get(OLLAMA_HOST + "/api/version", timeout=2).json()
+        ollama_version = version_data.get("version")
+    except requests.RequestException:
+        ollama_ok = False
+        ollama_version = None
     try:
-        return f"{float(ns) / 1e9:.3f} s"
-    except (TypeError, ValueError):
-        return "—"
+        model_count = len(list_model_tags()) if ollama_ok else 0
+    except HTTPException:
+        model_count = 0
+    return {
+        "ollama": {"available": ollama_ok, "version": ollama_version, "host": OLLAMA_HOST, "models": model_count},
+        "nvidia_smi": {"available": gpu_snapshot() is not None},
+        "node": {"available": bool(node)},
+        "promptfoo": {"available": bool(promptfoo), "command": promptfoo, "npx_available": bool(npx), "install": "npm install -g promptfoo"},
+        "lm_eval": {"available": bool(lm_eval), "command": lm_eval, "install": "python -m pip install 'lm_eval[api]'"},
+        "llama_bench": {"available": bool(llama_bench), "command": llama_bench, "install": "Build llama.cpp or install a compatible llama-bench binary"},
+        "nsight_systems": {"available": bool(nsys), "command": nsys, "install": "Install NVIDIA Nsight Systems for Windows"},
+    }
 
 
-def get_tags() -> list[dict[str, Any]]:
-    try:
-        return ollama_get("/api/tags").get("models", [])
-    except requests.RequestException as exc:
-        st.error(f"Cannot reach Ollama at {DEFAULT_HOST}: {exc}")
-        return []
+def quantile(values: list[float], q: float) -> float | None:
+    valid = sorted(v for v in values if math.isfinite(v))
+    if not valid:
+        return None
+    if len(valid) == 1:
+        return valid[0]
+    pos = (len(valid) - 1) * q
+    low = int(math.floor(pos))
+    high = int(math.ceil(pos))
+    if low == high:
+        return valid[low]
+    return valid[low] * (high - pos) + valid[high] * (pos - low)
 
 
-def get_show(model: str) -> dict[str, Any]:
-    try:
-        response = ollama_post("/api/show", {"model": model, "verbose": True})
+def summarize_trials(trials: list[dict[str, Any]]) -> dict[str, Any]:
+    def vals(key: str) -> list[float]:
+        return [float(row[key]) for row in trials if isinstance(row.get(key), (int, float)) and math.isfinite(float(row[key]))]
+    latencies = vals("client_latency_s")
+    generation_speed = vals("generation_tokens_per_second")
+    prompt_speed = vals("prompt_tokens_per_second")
+    ttft = vals("time_to_first_token_s")
+    return {
+        "completed_trials": len(trials),
+        "latency_median_s": statistics.median(latencies) if latencies else None,
+        "latency_p95_s": quantile(latencies, 0.95),
+        "latency_mean_s": statistics.mean(latencies) if latencies else None,
+        "ttft_median_s": statistics.median(ttft) if ttft else None,
+        "generation_tokens_per_second_median": statistics.median(generation_speed) if generation_speed else None,
+        "prompt_tokens_per_second_median": statistics.median(prompt_speed) if prompt_speed else None,
+        "generation_tokens_per_second_mean": statistics.mean(generation_speed) if generation_speed else None,
+    }
+
+
+def stream_chat(model: str, prompt: str, system_prompt: str, temperature: float, context_length: int, max_tokens: int) -> dict[str, Any]:
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt},
+        ],
+        "stream": True,
+        "keep_alive": "10m",
+        "options": {"temperature": temperature, "num_ctx": context_length, "num_predict": max_tokens},
+    }
+    start = time.perf_counter()
+    first_token_at: float | None = None
+    output = ""
+    final: dict[str, Any] = {}
+    with requests.post(OLLAMA_HOST + "/api/chat", json=payload, stream=True, timeout=(5, 300)) as response:
         response.raise_for_status()
-        return response.json()
-    except requests.RequestException as exc:
-        st.warning(f"Ollama could not return model details: {exc}")
-        return {}
+        for line in response.iter_lines(decode_unicode=True):
+            if not line:
+                continue
+            event = json.loads(line)
+            chunk = (event.get("message") or {}).get("content") or ""
+            if chunk:
+                if first_token_at is None:
+                    first_token_at = time.perf_counter()
+                output += chunk
+            if event.get("done"):
+                final = event
+    end = time.perf_counter()
+    eval_count = final.get("eval_count")
+    eval_duration = final.get("eval_duration")
+    prompt_count = final.get("prompt_eval_count")
+    prompt_duration = final.get("prompt_eval_duration")
+    return {
+        "output": output,
+        "prompt_tokens": prompt_count,
+        "output_tokens": eval_count,
+        "prompt_eval_duration_s": (prompt_duration / 1e9) if isinstance(prompt_duration, (float, int)) else None,
+        "generation_duration_s": (eval_duration / 1e9) if isinstance(eval_duration, (float, int)) else None,
+        "server_total_duration_s": (final.get("total_duration") / 1e9) if isinstance(final.get("total_duration"), (float, int)) else None,
+        "model_load_duration_s": (final.get("load_duration") / 1e9) if isinstance(final.get("load_duration"), (float, int)) else None,
+        "prompt_tokens_per_second": (prompt_count / (prompt_duration / 1e9)) if prompt_count and prompt_duration else None,
+        "generation_tokens_per_second": (eval_count / (eval_duration / 1e9)) if eval_count and eval_duration else None,
+        "time_to_first_token_s": (first_token_at - start) if first_token_at is not None else None,
+        "client_latency_s": end - start,
+        "done_reason": final.get("done_reason"),
+    }
 
 
-# Sidebar controls
-st.sidebar.header("Connection & experiment")
-st.sidebar.caption(f"Ollama endpoint: {DEFAULT_HOST}")
-st.sidebar.markdown("Model tags and settings are read from your local Ollama service.")
+class PerformanceRequest(BaseModel):
+    models: list[str] = Field(min_length=1, max_length=8)
+    prompts: list[str] = Field(min_length=1, max_length=30)
+    repetitions: int = Field(default=5, ge=1, le=50)
+    warmups: int = Field(default=1, ge=0, le=3)
+    temperature: float = Field(default=0.0, ge=0, le=2)
+    context_length: int = Field(default=2048, ge=512, le=16384)
+    max_tokens: int = Field(default=128, ge=16, le=2048)
+    system_prompt: str = "You are a helpful assistant. Answer the prompt clearly and accurately."
+    sample_interval_s: float = Field(default=1.0, ge=0.5, le=5.0)
 
-try:
-    tags = get_tags()
-except Exception:
-    tags = []
-model_names = [m.get("name") or m.get("model") for m in tags if m.get("name") or m.get("model")]
-if not model_names:
-    st.warning("No Ollama models found. Start Ollama and pull a model, e.g. `ollama pull qwen2.5:1.5b-instruct-q4_K_M`.")
-    st.stop()
 
-default_model = next((n for n in model_names if "qwen2.5:1.5b-instruct-q4_K_M" in n), model_names[0])
-selected_model = st.sidebar.selectbox("Model", model_names, index=model_names.index(default_model))
-system_prompt = st.sidebar.text_area(
-    "System prompt",
-    value="You are a helpful assistant. Answer clearly and accurately.",
-    height=110,
-)
-temperature = st.sidebar.slider("Temperature", 0.0, 2.0, 0.2, 0.1)
-context_length = st.sidebar.select_slider("Context length", options=[512, 1024, 2048, 4096, 8192, 16384], value=2048)
-max_tokens = st.sidebar.select_slider("Maximum output tokens", options=[32, 64, 128, 256, 512, 1024], value=256)
-st.sidebar.caption("Context options depend on model/runtime support and available memory.")
+class PromptfooCase(BaseModel):
+    question: str = Field(min_length=1, max_length=5000)
+    expected: str = Field(min_length=1, max_length=2000)
+    assertion: str = "contains"
 
-# Persistent app state
-if "telemetry" not in st.session_state:
-    st.session_state.telemetry = []
-if "chat" not in st.session_state:
-    st.session_state.chat = []
-if "request_metrics" not in st.session_state:
-    st.session_state.request_metrics = []
 
-# Tabs
-tab_live, tab_chat, tab_model, tab_files = st.tabs(["Live telemetry", "Chat & experiments", "Model inspector", "Files & logs"])
+class PromptfooRequest(BaseModel):
+    models: list[str] = Field(min_length=1, max_length=8)
+    cases: list[PromptfooCase] = Field(min_length=1, max_length=100)
+    temperature: float = Field(default=0.0, ge=0, le=2)
+    context_length: int = Field(default=2048, ge=512, le=16384)
+    max_tokens: int = Field(default=128, ge=16, le=2048)
 
-with tab_live:
-    st.subheader("Live hardware and Ollama state")
-    poll_seconds = st.slider("Refresh interval (seconds)", 1, 5, 1, key="poll_seconds")
-    try:
-        from streamlit_autorefresh import st_autorefresh
-        st_autorefresh(interval=poll_seconds * 1000, key="telemetry_refresh")
-    except ImportError:
-        st.info("Auto-refresh component not installed. Restart or interact with the dashboard to refresh; install streamlit-autorefresh for periodic refresh.")
-    snapshot = collect_snapshot()
-    st.session_state.telemetry.append(snapshot)
-    st.session_state.telemetry = st.session_state.telemetry[-300:]
-    gpu = snapshot.get("gpu", {})
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("CPU utilization", f"{snapshot['cpu_util_pct']:.1f}%")
-    m2.metric("System RAM", f"{snapshot['ram_used_gb']:.2f} / {snapshot['ram_total_gb']:.2f} GB", f"{snapshot['ram_pct']:.1f}% used")
-    m3.metric("GPU utilization", f"{gpu.get('gpu_util_pct'):.0f}%" if gpu.get("gpu_util_pct") is not None else "Unavailable")
-    m4.metric("VRAM", f"{gpu.get('vram_used_mb', 0)/1024:.2f} / {gpu.get('vram_total_mb', 0)/1024:.2f} GB" if gpu.get("vram_total_mb") is not None else "Unavailable")
-    m5, m6, m7, m8 = st.columns(4)
-    m5.metric("GPU temperature", f"{gpu['gpu_temp_c']:.0f} °C" if gpu.get("gpu_temp_c") is not None else "Unavailable")
-    m6.metric("GPU power", f"{gpu['gpu_power_w']:.1f} W" if gpu.get("gpu_power_w") is not None else "Unavailable")
-    m7.metric("Ollama processes RSS", f"{snapshot['ollama_process_mb']:.0f} MB")
-    m8.metric("Ollama-reported VRAM", f"{snapshot['ollama_vram_allocated_gb']:.2f} GB")
-    st.caption("GPU readings are device-wide and may include other applications. Process RSS is not equal to model weights or GPU memory.")
-    if snapshot["loaded_models"]:
-        st.markdown("**Loaded model placement reported by Ollama**")
-        st.dataframe(pd.DataFrame(snapshot["loaded_models"]), use_container_width=True, hide_index=True)
-    else:
-        st.info("Ollama reports no currently loaded model. Open the Chat tab and send a prompt, or run a model in another terminal.")
-    history = pd.json_normalize(st.session_state.telemetry, sep=".")
-    if not history.empty:
-        history["timestamp"] = pd.to_datetime(history["timestamp"])
-        st.markdown("**Recent telemetry history**")
-        chart_cols = [c for c in ["cpu_util_pct", "ram_pct", "gpu.gpu_util_pct"] if c in history.columns]
-        if chart_cols:
-            st.line_chart(history.set_index("timestamp")[chart_cols], height=230)
-        if "gpu.vram_used_mb" in history.columns:
-            st.line_chart(history.set_index("timestamp")[["gpu.vram_used_mb"]], height=180)
-    st.download_button("Download current telemetry history (CSV)", history.to_csv(index=False), "telemetry-history.csv", "text/csv")
 
-with tab_chat:
-    st.subheader("Chat with the selected local model")
-    st.caption("Requests stream through Ollama's local API. Response statistics are shown when returned by Ollama.")
-    for message in st.session_state.chat:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
-    user_prompt = st.chat_input("Ask your model something…")
-    if user_prompt:
-        st.session_state.chat.append({"role": "user", "content": user_prompt})
-        with st.chat_message("user"):
-            st.markdown(user_prompt)
-        messages = [{"role": "system", "content": system_prompt}]
-        messages.extend({"role": item["role"], "content": item["content"]} for item in st.session_state.chat[-12:])
-        payload = {
-            "model": selected_model,
-            "messages": messages,
-            "stream": True,
-            "options": {"temperature": temperature, "num_ctx": context_length, "num_predict": max_tokens},
-            "keep_alive": "10m",
-        }
-        response_text = ""
-        latest_record: dict[str, Any] = {}
-        started = time.perf_counter()
-        with st.chat_message("assistant"):
-            live_text = st.empty()
-            try:
-                with ollama_post("/api/chat", payload, stream=True) as response:
-                    response.raise_for_status()
-                    for raw_line in response.iter_lines(decode_unicode=True):
-                        if not raw_line:
-                            continue
-                        event = json.loads(raw_line)
-                        response_text += event.get("message", {}).get("content", "")
-                        if response_text:
-                            live_text.markdown(response_text + "▌")
-                        if event.get("done"):
-                            latest_record = event
-                live_text.markdown(response_text or "*(No text returned.)*")
-            except requests.RequestException as exc:
-                response_text = f"Ollama request failed: {exc}"
-                live_text.error(response_text)
-        elapsed_s = time.perf_counter() - started
-        if not response_text.startswith("Ollama request failed:"):
-            st.session_state.chat.append({"role": "assistant", "content": response_text})
-            prompt_n = latest_record.get("prompt_eval_count")
-            eval_n = latest_record.get("eval_count")
-            eval_duration = latest_record.get("eval_duration")
-            prompt_duration = latest_record.get("prompt_eval_duration")
-            metrics = {
-                "timestamp": datetime.now().isoformat(timespec="seconds"),
-                "model": selected_model,
-                "temperature": temperature,
-                "context_length": context_length,
-                "max_output_tokens": max_tokens,
-                "prompt_tokens": prompt_n,
-                "generated_tokens": eval_n,
-                "prompt_tokens_per_second": (prompt_n / (prompt_duration / 1e9)) if prompt_n and prompt_duration else None,
-                "generation_tokens_per_second": (eval_n / (eval_duration / 1e9)) if eval_n and eval_duration else None,
-                "prompt_eval_duration_s": prompt_duration / 1e9 if prompt_duration else None,
-                "generation_duration_s": eval_duration / 1e9 if eval_duration else None,
-                "total_duration_s": latest_record.get("total_duration", 0) / 1e9 if latest_record.get("total_duration") else elapsed_s,
-                "model_load_duration_s": latest_record.get("load_duration", 0) / 1e9 if latest_record.get("load_duration") else None,
-            }
-            st.session_state.request_metrics.append(metrics)
-            st.markdown("**Request metrics**")
-            a, b, c, d = st.columns(4)
-            a.metric("Prompt tokens", str(prompt_n) if prompt_n is not None else "—")
-            b.metric("Output tokens", str(eval_n) if eval_n is not None else "—")
-            bps = metrics["generation_tokens_per_second"]
-            c.metric("Generation speed", f"{bps:.2f} tok/s" if bps is not None else "—")
-            d.metric("Total duration", f"{metrics['total_duration_s']:.2f} s")
-            with st.expander("Full request metrics (JSON)"):
-                st.json(metrics)
-    if st.session_state.request_metrics:
-        st.markdown("**Requests in this session**")
-        metric_df = pd.DataFrame(st.session_state.request_metrics)
-        st.dataframe(metric_df, use_container_width=True, hide_index=True)
-        st.download_button("Download request metrics (CSV)", metric_df.to_csv(index=False), "request-metrics.csv", "text/csv")
+class LMEvalRequest(BaseModel):
+    model: str
+    task: str = "gsm8k"
+    limit: int = Field(default=25, ge=1, le=500)
 
-with tab_model:
-    st.subheader("Model metadata and effective configuration")
-    st.caption("Metadata shown here comes from Ollama's local API; not every field exists for every model.")
-    if st.button("Refresh model details"):
-        st.session_state.model_info_refresh = time.time()
-    info = get_show(selected_model)
-    if info:
-        model_details = info.get("details", {})
-        model_info = info.get("model_info", {})
-        cols = st.columns(3)
-        cols[0].metric("Model file size", bytes_text(next((m.get("size") for m in tags if (m.get("name") or m.get("model")) == selected_model), None)) if any((m.get("name") or m.get("model")) == selected_model for m in tags) else "—")
-        cols[1].metric("Parameter size", model_details.get("parameter_size", "—"))
-        cols[2].metric("Quantization", model_details.get("quantization_level", "—"))
-        st.markdown("**Details**")
-        st.json(model_details)
-        st.markdown("**Architecture / model metadata**")
-        st.json(model_info)
-        for key in ("modelfile", "template", "system", "parameters", "license", "capabilities"):
-            if key in info and info[key]:
-                with st.expander(key.title()):
-                    if isinstance(info[key], list):
-                        st.code("\n".join(str(x) for x in info[key]))
-                    else:
-                        st.code(str(info[key]))
-        with st.expander("Full /api/show response"):
-            st.json(info)
-    st.markdown("**Installed model tags**")
-    st.dataframe(pd.DataFrame(tags), use_container_width=True, hide_index=True)
 
-with tab_files:
-    st.subheader("Selected local Ollama files and logs")
-    st.warning("This tab reads selected files for inspection. Do not share logs or environment dumps without checking them for private paths or other sensitive details.")
-    home = Path.home()
-    appdata = Path(os.environ.get("APPDATA", home / "AppData" / "Roaming"))
-    localappdata = Path(os.environ.get("LOCALAPPDATA", home / "AppData" / "Local"))
-    candidate_dirs = [
-        appdata / "Ollama",
-        localappdata / "Ollama",
-        home / ".ollama",
-        Path(os.environ.get("OLLAMA_MODELS", home / ".ollama" / "models")),
-    ]
-    env_keys = ["OLLAMA_HOST", "OLLAMA_MODELS", "OLLAMA_ORIGINS", "CUDA_VISIBLE_DEVICES"]
-    st.markdown("**Relevant environment variables**")
-    env_values = {key: os.environ.get(key, "(not set in dashboard process)") for key in env_keys}
-    st.json(env_values)
-    st.markdown("**Known local directories**")
-    st.dataframe(pd.DataFrame([{"path": str(p), "exists": p.exists(), "directory": p.is_dir()} for p in candidate_dirs]), use_container_width=True, hide_index=True)
-    files_found = []
-    for base in candidate_dirs:
-        if base.is_dir():
-            try:
-                for path in list(base.rglob("*"))[:300]:
-                    if path.is_file() and (path.suffix.lower() in {".log", ".txt", ".json", ".yaml", ".yml", ".ini", ".toml"} or path.name.lower() in {"modelfile", "config"}):
-                        try:
-                            if path.stat().st_size <= 1_000_000:
-                                files_found.append(path)
-                        except OSError:
-                            pass
-            except OSError:
-                pass
-    files_found = list(dict.fromkeys(files_found))[:200]
-    if files_found:
-        labels = [str(p) for p in files_found]
-        choice = st.selectbox("Select a file to inspect", labels)
-        selected_path = Path(choice)
+class ImportRequest(BaseModel):
+    filename: str
+    content: str = Field(max_length=5_000_000)
+    file_format: str = "json"
+
+
+def ensure_valid_models(names: list[str]) -> None:
+    available = {item["name"] for item in list_model_tags()}
+    missing = [name for name in names if name not in available]
+    if missing:
+        raise HTTPException(status_code=400, detail="Models not installed in Ollama: " + ", ".join(missing))
+
+
+def begin_job(kind: str, config: dict[str, Any], worker) -> str:
+    experiment_id = uuid.uuid4().hex[:12]
+    db_create(experiment_id, kind, config)
+
+    def execute() -> None:
+        db_update(experiment_id, status="running", started_at=now_iso(), progress=0)
         try:
-            content = selected_path.read_text(encoding="utf-8", errors="replace")
-            st.caption(f"{selected_path.stat().st_size:,} bytes · {selected_path}")
-            st.code(content[-30000:] if len(content) > 30000 else content, language="text")
-        except OSError as exc:
-            st.error(f"Could not read this file: {exc}")
-    else:
-        st.info("No readable text configuration/log files were found in the standard locations scanned. Ollama's model blobs are binary and are not displayed as text.")
-    st.markdown("**Process and installation information**")
-    st.code(json.dumps({"python": os.sys.version, "platform": os.name, "ollama_host": DEFAULT_HOST, "nvidia_smi_path": run_command(["where", "nvidia-smi"])}, indent=2))
+            result = worker(experiment_id, config)
+            db_update(experiment_id, status="completed", finished_at=now_iso(), progress=100,
+                      result_json=json.dumps(result, ensure_ascii=False))
+        except Exception as exc:
+            db_update(experiment_id, status="failed", finished_at=now_iso(), error=str(exc),
+                      result_json=json.dumps({"error": str(exc)}))
 
-st.divider()
-st.caption("Observatory is a local research prototype. Device telemetry is sampled, GPU metrics may be device-wide, and per-layer/kernel tracing requires dedicated profiling tools.")
+    thread = threading.Thread(target=execute, name="observatory-" + kind, daemon=True)
+    thread.start()
+    return experiment_id
+
+
+def performance_worker(experiment_id: str, config: dict[str, Any]) -> dict[str, Any]:
+    trials: list[dict[str, Any]] = []
+    telemetry_samples: list[dict[str, Any]] = []
+    stop_sampling = threading.Event()
+    sample_lock = threading.Lock()
+    total_units = len(config["models"]) * (config["warmups"] + len(config["prompts"]) * config["repetitions"])
+    completed_units = 0
+
+    def sampler() -> None:
+        while not stop_sampling.is_set():
+            try:
+                sample = collect_telemetry()
+                with sample_lock:
+                    telemetry_samples.append(sample)
+                    if len(telemetry_samples) > 2500:
+                        del telemetry_samples[:500]
+            except Exception:
+                pass
+            stop_sampling.wait(config["sample_interval_s"])
+
+    sampler_thread = threading.Thread(target=sampler, name="observatory-telemetry", daemon=True)
+    sampler_thread.start()
+    errors: list[dict[str, Any]] = []
+    try:
+        for model in config["models"]:
+            if config["warmups"] and config["prompts"]:
+                for warm_idx in range(config["warmups"]):
+                    try:
+                        stream_chat(model, config["prompts"][0], config["system_prompt"], config["temperature"],
+                                    config["context_length"], config["max_tokens"])
+                    except Exception as exc:
+                        errors.append({"model": model, "phase": "warmup", "error": str(exc)})
+                    completed_units += 1
+                    db_update(experiment_id, progress=min(95, completed_units / max(total_units, 1) * 100))
+            for prompt_idx, prompt in enumerate(config["prompts"]):
+                for repetition in range(config["repetitions"]):
+                    before = collect_telemetry()
+                    started_at = now_iso()
+                    started_clock = time.perf_counter()
+                    try:
+                        metrics = stream_chat(model, prompt, config["system_prompt"], config["temperature"],
+                                              config["context_length"], config["max_tokens"])
+                        outcome = "completed"
+                        error = None
+                    except Exception as exc:
+                        metrics = {}
+                        outcome = "failed"
+                        error = str(exc)
+                        errors.append({"model": model, "prompt_index": prompt_idx, "repetition": repetition + 1, "error": error})
+                    elapsed = time.perf_counter() - started_clock
+                    after = collect_telemetry()
+                    with sample_lock:
+                        relevant = [item for item in telemetry_samples if started_at <= item["timestamp"] <= now_iso()]
+                    trial = {
+                        "model": model,
+                        "prompt_index": prompt_idx,
+                        "prompt": prompt,
+                        "repetition": repetition + 1,
+                        "status": outcome,
+                        "started_at": started_at,
+                        "elapsed_wall_s": elapsed,
+                        "before": before,
+                        "after": after,
+                        "sample_count_during_request": len(relevant),
+                        "peak_sampled_vram_mb": max((s.get("gpu", {}).get("memory_used_mb") for s in relevant if s.get("gpu") and isinstance(s["gpu"].get("memory_used_mb"), (int, float))), default=None),
+                        "peak_sampled_ram_bytes": max((s.get("ram_used_bytes") for s in relevant if isinstance(s.get("ram_used_bytes"), (int, float))), default=None),
+                        **metrics,
+                    }
+                    if error:
+                        trial["error"] = error
+                    trials.append(trial)
+                    completed_units += 1
+                    db_update(experiment_id, progress=min(99, completed_units / max(total_units, 1) * 100),
+                              result_json=json.dumps({"trials": trials, "errors": errors}, ensure_ascii=False))
+    finally:
+        stop_sampling.set()
+        sampler_thread.join(timeout=3)
+
+    by_model = {}
+    for model in config["models"]:
+        subset = [row for row in trials if row["model"] == model and row["status"] == "completed"]
+        by_model[model] = summarize_trials(subset)
+    return {
+        "config": config,
+        "summary_by_model": by_model,
+        "trials": trials,
+        "errors": errors,
+        "telemetry_samples": telemetry_samples,
+        "interpretation_notes": [
+            "Latency and token timing come from the Ollama response stream and response statistics.",
+            "System and GPU telemetry are shared-device readings; they are not isolated to the model.",
+            "The observer samples resources during the experiment and can introduce small measurement overhead.",
+            "No per-request energy is claimed. Instantaneous GPU power is not integrated into joules.",
+            "Short requests may finish between telemetry samples; peak sampled memory can therefore miss brief spikes.",
+            "Quality is not inferred from performance measurements. Run a quality evaluation separately.",
+        ],
+    }
+
+
+def promptfoo_worker(experiment_id: str, config: dict[str, Any]) -> dict[str, Any]:
+    run_dir = RUNS_DIR / experiment_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    promptfoo_config = {
+        "description": "LLM Observatory quality evaluation " + experiment_id,
+        "prompts": ["{{question}}"],
+        "providers": [
+            {
+                "id": "ollama:chat:" + model,
+                "config": {
+                    "temperature": config["temperature"],
+                    "num_ctx": config["context_length"],
+                    "num_predict": config["max_tokens"],
+                    "keep_alive": "10m",
+                },
+            }
+            for model in config["models"]
+        ],
+        "tests": [
+            {
+                "vars": {"question": case["question"]},
+                "assert": [{"type": case["assertion"], "value": case["expected"]}],
+            }
+            for case in config["cases"]
+        ],
+        "evaluateOptions": {"maxConcurrency": 1},
+    }
+    config_path = run_dir / "promptfooconfig.yaml"
+    report_path = run_dir / "promptfoo-results.json"
+    config_path.write_text(json.dumps(promptfoo_config, ensure_ascii=False, indent=2), encoding="utf-8")
+    promptfoo = shutil.which("promptfoo")
+    npx = shutil.which("npx") or shutil.which("npx.cmd")
+    if promptfoo:
+        command = [promptfoo, "eval", "-c", str(config_path), "-o", str(report_path), "--no-progress-bar", "-j", "1"]
+    elif npx:
+        command = [npx, "--yes", "promptfoo", "eval", "-c", str(config_path), "-o", str(report_path), "--no-progress-bar", "-j", "1"]
+    else:
+        raise RuntimeError("Promptfoo is not installed and npx was not found. Install Node.js, then run: npm install -g promptfoo")
+    env = os.environ.copy()
+    env.setdefault("OLLAMA_BASE_URL", OLLAMA_HOST)
+    completed = subprocess.run(command, cwd=str(run_dir), capture_output=True, text=True, timeout=1800,
+                               env=env, check=False, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    parsed_report = None
+    if report_path.exists():
+        try:
+            parsed_report = json.loads(report_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            parsed_report = None
+    result = {
+        "config": config,
+        "command_name": "promptfoo eval",
+        "return_code": completed.returncode,
+        "stdout_tail": completed.stdout[-12000:],
+        "stderr_tail": completed.stderr[-12000:],
+        "report_available": parsed_report is not None,
+        "report_path": str(report_path) if report_path.exists() else None,
+        "report": parsed_report,
+        "notes": [
+            "Assertions measure the checks defined in this evaluation, not a universal hallucination rate.",
+            "A contains assertion is only a basic regression check. Use reference-backed tasks and human-validated judging for factuality claims.",
+            "Keep quality grading separate from hardware performance runs to avoid resource contention.",
+        ],
+    }
+    if completed.returncode != 0:
+        raise RuntimeError("Promptfoo exited with code " + str(completed.returncode) + ". See experiment result output for the CLI logs. " + completed.stderr[-1500:])
+    return result
+
+
+def lm_eval_worker(experiment_id: str, config: dict[str, Any]) -> dict[str, Any]:
+    executable = shutil.which("lm_eval") or shutil.which("lm_eval.exe")
+    if not executable:
+        raise RuntimeError("LM Evaluation Harness CLI was not found. Install with: python -m pip install 'lm_eval[api]'")
+    output_dir = RUNS_DIR / experiment_id / "lm_eval"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    command = [
+        executable, "run",
+        "--model", "local-chat-completions",
+        "--model_args", "model=" + config["model"] + ",base_url=" + OLLAMA_HOST + "/v1,num_concurrent=1,max_retries=2",
+        "--tasks", config["task"],
+        "--limit", str(config["limit"]),
+        "--output_path", str(output_dir),
+        "--log_samples",
+    ]
+    completed = subprocess.run(command, capture_output=True, text=True, timeout=3600, check=False,
+                               creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    if completed.returncode != 0:
+        raise RuntimeError("lm_eval exited with code " + str(completed.returncode) + ". " + completed.stderr[-3000:])
+    files = []
+    for path in output_dir.rglob("*"):
+        if path.is_file():
+            files.append({"name": path.name, "size_bytes": path.stat().st_size})
+    return {
+        "config": config,
+        "return_code": completed.returncode,
+        "stdout_tail": completed.stdout[-12000:],
+        "stderr_tail": completed.stderr[-12000:],
+        "artifacts": files,
+        "output_dir": str(output_dir),
+        "notes": [
+            "The OpenAI-compatible chat API path supports generation-style tasks, not likelihood-based metrics requiring logits or logprobs.",
+            "Verify the selected task's output type and scoring protocol before interpreting its score.",
+            "Run this benchmark separately from hardware performance trials to avoid contention.",
+        ],
+    }
+
+
+@app.get("/")
+def index() -> FileResponse:
+    return FileResponse(WEB_DIR / "index.html")
+
+
+@app.get("/api/health")
+def health() -> dict[str, Any]:
+    try:
+        response = requests.get(OLLAMA_HOST + "/api/version", timeout=2)
+        response.raise_for_status()
+        ollama = {"available": True, "version": response.json().get("version"), "host": OLLAMA_HOST}
+    except requests.RequestException as exc:
+        ollama = {"available": False, "version": None, "host": OLLAMA_HOST, "error": str(exc)}
+    return {
+        "app": {"name": "LLM Observatory", "version": app.version, "storage": "SQLite"},
+        "ollama": ollama,
+        "tools": tool_status(),
+    }
+
+
+@app.get("/api/models")
+def models() -> dict[str, Any]:
+    return {"models": list_model_tags()}
+
+
+@app.get("/api/telemetry")
+def telemetry() -> dict[str, Any]:
+    return collect_telemetry()
+
+
+@app.post("/api/chat")
+def chat(body: dict[str, Any]) -> dict[str, Any]:
+    model = str(body.get("model", "")).strip()
+    if not model:
+        raise HTTPException(status_code=400, detail="Select a model first.")
+    ensure_valid_models([model])
+    prompt = str(body.get("prompt", "")).strip()
+    if not prompt:
+        raise HTTPException(status_code=400, detail="Enter a prompt.")
+    try:
+        result = stream_chat(
+            model,
+            prompt,
+            str(body.get("system_prompt") or "You are a helpful assistant."),
+            float(body.get("temperature", 0.0)),
+            int(body.get("context_length", 2048)),
+            int(body.get("max_tokens", 256)),
+        )
+        return {"model": model, **result}
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=502, detail="Ollama inference failed: " + str(exc))
+
+
+@app.post("/api/experiments/performance")
+def start_performance(body: PerformanceRequest) -> dict[str, Any]:
+    ensure_valid_models(body.models)
+    prompts = [prompt.strip() for prompt in body.prompts if prompt.strip()]
+    if not prompts:
+        raise HTTPException(status_code=400, detail="Add at least one non-empty prompt.")
+    if len(body.models) * len(prompts) * body.repetitions > 1000:
+        raise HTTPException(status_code=400, detail="This run would exceed 1,000 measured requests. Reduce models, prompts or repetitions.")
+    config = body.model_dump()
+    config["prompts"] = prompts
+    experiment_id = begin_job("performance", config, performance_worker)
+    return {"experiment_id": experiment_id, "status": "queued"}
+
+
+@app.post("/api/evaluations/promptfoo")
+def start_promptfoo(body: PromptfooRequest) -> dict[str, Any]:
+    ensure_valid_models(body.models)
+    if any(case.assertion not in {"contains", "equals", "not-contains"} for case in body.cases):
+        raise HTTPException(status_code=400, detail="Supported basic assertions: contains, equals, not-contains.")
+    status = tool_status()["promptfoo"]
+    if not status["available"] and not status["npx_available"]:
+        raise HTTPException(status_code=400, detail="Promptfoo is unavailable. Install Node.js, then run npm install -g promptfoo.")
+    config = body.model_dump()
+    experiment_id = begin_job("promptfoo", config, promptfoo_worker)
+    return {"experiment_id": experiment_id, "status": "queued"}
+
+
+@app.post("/api/evaluations/lm-eval")
+def start_lm_eval(body: LMEvalRequest) -> dict[str, Any]:
+    ensure_valid_models([body.model])
+    if body.task not in {"gsm8k", "truthfulqa_gen", "ifeval"}:
+        raise HTTPException(status_code=400, detail="Choose a supported generation-style task: gsm8k, truthfulqa_gen or ifeval.")
+    if not (shutil.which("lm_eval") or shutil.which("lm_eval.exe")):
+        raise HTTPException(status_code=400, detail="LM Evaluation Harness is not installed. Install with: python -m pip install 'lm_eval[api]'")
+    config = body.model_dump()
+    experiment_id = begin_job("lm_eval", config, lm_eval_worker)
+    return {"experiment_id": experiment_id, "status": "queued"}
+
+
+@app.post("/api/results/import")
+def import_results(body: ImportRequest) -> dict[str, Any]:
+    filename = Path(body.filename).name[:200]
+    if body.file_format not in {"json", "csv"}:
+        raise HTTPException(status_code=400, detail="Only CSV and JSON result files are supported.")
+    if body.file_format == "json":
+        try:
+            parsed = json.loads(body.content)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=400, detail="Invalid JSON: " + str(exc))
+    else:
+        try:
+            parsed = list(csv.DictReader(body.content.splitlines()))
+        except csv.Error as exc:
+            raise HTTPException(status_code=400, detail="Invalid CSV: " + str(exc))
+    experiment_id = uuid.uuid4().hex[:12]
+    config = {"filename": filename, "format": body.file_format, "source": "imported external benchmark"}
+    result = {"imported_data": parsed, "notes": ["Imported external result. Backend, model, measurement conditions and units may differ; do not merge with native Ollama results without checking comparability."]}
+    db_create(experiment_id, "imported_benchmark", config)
+    db_update(experiment_id, status="completed", started_at=now_iso(), finished_at=now_iso(),
+              progress=100, result_json=json.dumps(result, ensure_ascii=False))
+    return {"experiment_id": experiment_id, "status": "completed"}
+
+
+@app.get("/api/experiments")
+def experiments(limit: int = 100) -> dict[str, Any]:
+    return {"experiments": db_list(max(1, min(limit, 250)))}
+
+
+@app.get("/api/experiments/{experiment_id}")
+def experiment(experiment_id: str) -> dict[str, Any]:
+    item = db_get(experiment_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Experiment not found.")
+    return {"experiment": item}
+
+
+@app.get("/api/experiments-export")
+def experiments_export() -> dict[str, Any]:
+    return {"generated_at": now_iso(), "experiments": db_list(250)}
+
+
+if WEB_DIR.exists() and (WEB_DIR / "index.html").exists() is False:
+    pass
