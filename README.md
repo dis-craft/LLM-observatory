@@ -12,7 +12,7 @@ See [docs/measurement-guide.md](docs/measurement-guide.md) for exact metric defi
 
 - **Model registry:** lists locally installed Ollama models and displays file size, family, parameter metadata and the quantization level reported by Ollama.
 - **Hardware telemetry:** samples system CPU/RAM, NVIDIA GPU utilization, VRAM, temperature, clocks and instantaneous power where supported; reports Ollama process RSS/CPU and the model allocation returned by Ollama.
-- **Performance benchmark:** offers Balanced, Prompt-processing, Generation, Long-context retrieval, and Custom workload profiles; lets you select an explicit baseline; reports median/mean/p95 latency, TTFT, prompt/generation throughput and durations, actual token counts, sampled peak memory, run environment metadata, and percentage changes against the baseline. Sampled GPU-device energy is estimated only when power-sample coverage is adequate; it is not model-isolated or whole-laptop energy.
+- **Performance benchmark:** offers Balanced, Prompt-processing, Generation, synthetic Long-context retrieval, synthetic Long input + long answer, and Custom workload profiles; lets you select an explicit baseline; reports median/mean/p95 latency, TTFT, prompt/generation throughput and durations, actual token counts, sampled peak memory, run environment metadata, within-prompt variability, attempted/completed/failed counts, and percentage changes against the baseline. Sampled GPU-device energy is estimated only when power-sample coverage is adequate; it is not model-isolated or whole-laptop energy.
 - **Quality benchmark:** built-in local evaluator runs the same reference cases repeatedly across selected variants, scoring contains/equals/not-contains assertions, normalized exact-reference matches, baseline text agreement, repeated-answer consistency, and request failures. It does not claim semantic similarity or a validated hallucination rate.
 - **Optional Promptfoo:** the external Promptfoo integration remains available via the API/tooling workflow for richer provider-based output assertions when Promptfoo or npx is installed.
 - **Standard benchmarks:** optionally invokes the LM Evaluation Harness through Ollama's OpenAI-compatible chat endpoint for selected generation tasks where the installed task and harness support that interface.
@@ -50,9 +50,9 @@ The server binds to loopback (127.0.0.1) by default. Do not bind it to all netwo
 ## Run the first controlled comparison
 
 1. In Ollama, install the quantized variants you intend to compare. For example, test Qwen2.5-1.5B-Instruct Q2_K and Q4_K_M.
-2. Open **Run benchmark** and select those installed variants.
+2. Open the single-page dashboard and select those installed variants in **Configure the experiment**.
 3. Choose a workload profile and the reference baseline. Use matched system prompt, temperature, context length and output-token cap; check the recorded actual token counts rather than assuming a text preset equals an exact token length.
-4. Keep trials serial, leave warm-up requests out of the measured trials, and repeat each condition.
+4. The runner performs warm-ups, then pairs models on each prompt/repetition and alternates their order. Leave other CPU/GPU-heavy applications closed where possible, and repeat each condition.
 5. Save the run and inspect its result record. Review the interpretation notes before using numbers in a report.
 6. Open **Quality checks** and run the same fixed reference cases separately from performance tests. Set at least 3 repetitions for a first reliability screen; choose the reference baseline explicitly; baseline agreement uses normalized text.
 
