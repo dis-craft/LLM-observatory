@@ -486,13 +486,16 @@
       return;
     }
     const baseline = result.baseline_model || "";
+    const baselinePassRate = summaries[baseline] && summaries[baseline].assertion_pass_rate;
+    const passDeltaPoints = (value) => value == null || baselinePassRate == null
+      ? "—" : ((value - baselinePassRate) * 100 > 0 ? "+" : "") + number((value - baselinePassRate) * 100, 1) + " pp";
     $("#quality-summary-note").textContent =
       "Baseline: " + baseline + " · " + (result.trials || []).length + " attempted quality trials. Normalized text checks ignore casing and punctuation but do not assess semantic equivalence.";
     const rows = Object.keys(summaries).map((model) => {
       const m = summaries[model];
       return '<tr' + (model === baseline ? ' class="baseline-row"' : '') + '>' +
         '<td><strong>' + escapeHtml(model) + '</strong>' + (model === baseline ? '<small>BASELINE</small>' : '') + '</td>' +
-        '<td><strong>' + pct(m.assertion_pass_rate) + '</strong></td>' +
+        '<td><strong>' + pct(m.assertion_pass_rate) + '</strong><small>' + passDeltaPoints(m.assertion_pass_rate) + ' vs baseline</small></td>' +
         '<td><strong>' + pct(m.reference_exact_match_rate) + '</strong></td>' +
         '<td><strong>' + pct(m.baseline_exact_agreement_rate) + '</strong></td>' +
         '<td><strong>' + pct(m.repeat_consistency_rate) + '</strong><small>' + number(m.repeat_consistency_cases, 0) + ' case(s)</small></td>' +
