@@ -43,6 +43,14 @@ class StaticContractTests(unittest.TestCase):
                          "/api/experiments/performance", "/api/evaluations/native", "/api/evaluations/promptfoo",
                          "/api/experiments", "/api/results/import"}.issubset(routes))
 
+    def test_quality_benchmark_controls_are_wired(self):
+        html = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
+        javascript = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
+        self.assertIn('id="quality-baseline"', html)
+        self.assertIn('id="quality-repetitions"', html)
+        self.assertIn('/api/evaluations/native', javascript)
+        self.assertIn('baseline_model: baselineModel', javascript)
+
     def test_experiment_storage_is_local_and_ignored(self):
         gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
         self.assertIn("data/", gitignore)
