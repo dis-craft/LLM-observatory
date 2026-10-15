@@ -289,6 +289,8 @@ def normalize_answer(value: str) -> str:
 def reference_assertion_passes(output: str, expected: str, assertion: str) -> bool:
     actual_norm = normalize_answer(output)
     expected_norm = normalize_answer(expected)
+    if not expected_norm:
+        return False
     if assertion == "contains":
         return expected_norm in actual_norm
     if assertion == "equals":
@@ -353,8 +355,9 @@ def summarize_quality_trials(
     models: list[str],
     case_count: int,
     repetitions: int,
+    baseline_model: str | None = None,
 ) -> dict[str, Any]:
-    baseline = models[0] if models else None
+    baseline = baseline_model if baseline_model in models else (models[0] if models else None)
     baseline_outputs = {
         (row["case_index"], row["repetition"]): normalize_answer(row.get("output", ""))
         for row in trials
@@ -522,6 +525,7 @@ class LMEvalRequest(BaseModel):
 
 class NativeEvaluationRequest(BaseModel):
     models: list[str] = Field(min_length=1, max_length=8)
+    baseline_model: str
     cases: list[PromptfooCase] = Field(min_length=1, max_length=100)
     repetitions: int = Field(default=3, ge=1, le=10)
     temperature: float = Field(default=0.0, ge=0, le=2)
@@ -700,6 +704,8 @@ def native_quality_worker(experiment_id: str, config: dict[str, Any]) -> dict[st
                         config["context_length"], config["max_tokens"],
                     )
                     output = metrics["output"]
+                    if not output.strip():
+                        raise RuntimeError("Model returned an empty answer")
                     row.update({
                         "status": "completed",
                         "output": output,
@@ -718,7 +724,7 @@ def native_quality_worker(experiment_id: str, config: dict[str, Any]) -> dict[st
         "config": config,
         "baseline_model": config["models"][0],
         "summary_by_model": summarize_quality_trials(
-            trials, config["models"], len(config["cases"]), config["repetitions"]
+            trials, config["models"], len(config["cases"]), config["repetitions"], config["baseline_model"]
         ),
         "trials": trials,
         "notes": [
@@ -909,6 +915,10 @@ def start_native_evaluation(body: NativeEvaluationRequest) -> dict[str, Any]:
     ensure_valid_models(body.models)
     if any(case.assertion not in {"contains", "equals", "not-contains"} for case in body.cases):
         raise HTTPException(status_code=400, detail="Supported reference checks: contains, equals, not-contains.")
+    if any(not normalize_answer(case.expected) for case in body.cases):
+        raise HTTPException(status_code=400, detail="Every expected answer must contain at least one letter or number.")
+    if body.baseline_model not in body.models:
+        raise HTTPException(status_code=400, detail="The baseline model must also be selected for the benchmark.")
     if len(body.models) * len(body.cases) * body.repetitions > 500:
         raise HTTPException(status_code=400, detail="This quality run would exceed 500 requests. Reduce models, cases or repetitions.")
     config = body.model_dump()
