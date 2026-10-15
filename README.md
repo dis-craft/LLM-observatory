@@ -50,7 +50,7 @@ The server binds to loopback (127.0.0.1) by default. Do not bind it to all netwo
 ## Run the first controlled comparison
 
 1. In Ollama, install the quantized variants you intend to compare. For example, test Qwen2.5-1.5B-Instruct Q2_K and Q4_K_M.
-2. Open **Performance lab** and select those installed variants.
+2. Open **Run benchmark** and select those installed variants.
 3. Use the same fixed prompts, system prompt, temperature, context length and output-token cap.
 4. Keep trials serial, leave warm-up requests out of the measured trials, and repeat each condition.
 5. Save the run and inspect its result record. Review the interpretation notes before using numbers in a report.
