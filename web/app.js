@@ -601,6 +601,92 @@
     }
   }
 
+  const defaultBalancedPrompts = [
+    "Explain why the sky appears blue in two sentences.",
+    "What is the difference between RAM and VRAM?",
+    "Solve step by step: if 3x + 5 = 20, what is x? Explain briefly."
+  ];
+
+  function makeLongContextPrompt(mode) {
+    const stations = [
+      "Amber", "Birch", "Cedar", "Dawn", "Elm", "Fern", "Grove", "Harbor",
+      "Indigo", "Juniper", "Kite", "Lake", "Maple", "North", "Orchid", "Pine",
+      "Quartz", "River", "Stone", "Timber", "Umber", "Vale", "Willow", "Xenon",
+      "Yarrow", "Zephyr", "Atlas", "Brook", "Clover", "Drift", "Ember", "Flint",
+      "Glimmer", "Haven", "Iris", "Jasper", "Knoll", "Lantern", "Meadow", "Nectar",
+      "Opal", "Prairie", "Quest", "Ripple", "Summit", "Thistle", "Unity", "Vista",
+      "Wren", "Xylem", "Yonder", "Zenith", "Aspen", "Boulder", "Coral", "Delta",
+      "Evergreen", "Frost", "Glacier", "Horizon", "Mariner", "Orbit", "Praxis", "Solstice"
+    ];
+    const logs = stations.map(function (station, index) {
+      const meter = 18 + ((index * 17) % 83);
+      const zone = String.fromCharCode(65 + (index % 6));
+      return "Log " + String(index + 1).padStart(3, "0") + ": Station " + station
+        + " reported zone " + zone + ", sensor value " + meter
+        + ", inspection status " + (index % 5 === 0 ? "review required" : "normal")
+        + ", last checked during shift " + (1 + (index % 3)) + ".";
+    });
+    logs.push("Calibration note: Beacon Station's verified reference code is K7-MARIGOLD-29. This code is case-sensitive in the source record.");
+    if (mode === "retrieval") {
+      return "Read all of the following operational logs carefully. Do not infer a value from a pattern; use the explicit calibration note. " +
+        logs.join(" ") +
+        " Question: What is the exact verified reference code for Beacon Station? Return only the code.";
+    }
+    return "Summarize this operational report in two short sentences. Focus on the patterns in sensor values and inspection status, and do not invent facts. " + logs.join(" ");
+  }
+
+  const workloadProfiles = {
+    balanced: {
+      prompts: defaultBalancedPrompts,
+      context: "2048",
+      output: "128",
+      description: "Three mixed prompts for a general edge-device snapshot. Actual token counts are recorded."
+    },
+    prefill: {
+      prompts: [makeLongContextPrompt("prefill")],
+      context: "4096",
+      output: "32",
+      description: "Long input with a short output cap. Focuses on prompt processing; actual input length depends on the model tokenizer."
+    },
+    decode: {
+      prompts: ["Write a detailed but factual technical guide to running language models on edge devices. Use eight clearly named sections, explain quantization, memory, latency, throughput, reliability, power, thermal limits, and deployment trade-offs. Include practical examples and finish with a short checklist. Do not claim measurements you have not performed."],
+      context: "2048",
+      output: "512",
+      description: "Short instruction with a higher output cap. Measures generation behaviour; the model may stop before reaching the cap."
+    },
+    retrieval: {
+      prompts: [makeLongContextPrompt("retrieval")],
+      context: "4096",
+      output: "32",
+      description: "Long-context lookup with a known answer. Use the separate Quality checks page to score answer correctness."
+    }
+  };
+
+  function applyWorkloadProfile(profileName) {
+    const profile = workloadProfiles[profileName];
+    const description = $("#workload-description");
+    if (!profile) {
+      if (description) description.textContent = "Custom prompts are used exactly as entered; other controls remain unchanged.";
+      return;
+    }
+    $("#performance-prompts").value = profile.prompts.join("\n");
+    $("#performance-context").value = profile.context;
+    $("#performance-output").value = profile.output;
+    if (description) description.textContent = profile.description;
+  }
+
+  $("#workload-profile").addEventListener("change", function () {
+    applyWorkloadProfile($("#workload-profile").value);
+  });
+  $("#performance-prompts").addEventListener("input", function () {
+    const profile = $("#workload-profile");
+    if (profile.value !== "custom") {
+      profile.value = "custom";
+      const description = $("#workload-description");
+      if (description) description.textContent = "Custom prompts are used exactly as entered; other controls remain unchanged.";
+    }
+  });
+
   $("#performance-form").addEventListener("submit", async function (event) {
     event.preventDefault();
     clearAlert();
