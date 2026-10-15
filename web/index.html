@@ -58,7 +58,7 @@
           <option value="balanced">Balanced edge workload — short mixed tasks</option>
           <option value="prefill">Prompt processing — long input, short answer</option>
           <option value="decode">Generation — short input, long answer</option>
-          <option value="retrieval">Long-context retrieval — find a known fact</option>
+          <option value="retrieval">Synthetic long-context retrieval — find a known code</option>
           <option value="long">Long input + long answer — synthesis</option>
           <option value="custom">Custom prompts</option>
         </select>
@@ -96,7 +96,7 @@ Solve step by step: if 3x + 5 = 20, what is x? Explain briefly.</textarea>
       <div class="section-head">
         <div><span class="step">02</span><div><h2>Evaluate answer quality separately</h2><p>Use fixed reference answers. This run is separate so grading does not compete with performance measurements.</p></div></div>
       </div>
-      <label class="field-title" for="quality-cases">Reference cases <span class="helper inline">one per line: question || expected answer or phrase</span></label>
+      <label class="field-title" for="quality-cases">Reference cases <span class="helper inline">one per line: question || expected answer or phrase</span></label><p class="helper">These are starter examples, not a validated research dataset. Replace or expand them with documented reference-backed tasks before drawing quality conclusions.</p>
       <textarea id="quality-cases" rows="7" spellcheck="false">What is the capital of Japan? || Tokyo
 How many sides does a triangle have? || three
 What is 7 multiplied by 8? || 56
