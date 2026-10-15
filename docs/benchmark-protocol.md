@@ -20,7 +20,8 @@ Each comparison needs four explicit pieces:
 - **Balanced edge workload:** three short, mixed questions; a quick general-purpose snapshot.
 - **Prompt processing:** longer synthetic log context, short output cap; useful for examining prompt-prefill behaviour. This is a generated test workload, not a real external dataset.
 - **Generation:** short instruction, higher output-token cap; useful for examining decode behaviour. The model may stop early, so use the actual output-token count.
-- **Long-context retrieval:** a longer context with a known lookup answer; useful for prompt-length and retrieval experiments. Score correctness separately in Quality checks.
+- **Long input + long answer:** synthetic log context and a higher output cap; combines prompt processing with sustained generation.
+- **Long-context retrieval:** synthetic records containing a planted lookup code; useful for controlled retrieval stress tests, not as a factual-knowledge benchmark.
 - **Custom prompts:** the researcher's own fixed workload.
 
 The text-based presets are reproducible prompts, **not exact token-length guarantees**. Prefill, retrieval and long-synthesis presets use synthetic log records; they are not real or externally sourced operational data. Token counts vary by tokenizer and include the actual request formatting. Review recorded prompt/output token counts before interpreting one run as a particular token-length class.
@@ -50,7 +51,7 @@ For broader evaluations, the optional [LM Evaluation Harness](https://github.com
 - It does not isolate GPU activity or power to the LLM process.
 - It does not measure whole-laptop energy without an external power measurement.
 - It does not measure semantic equivalence or a general hallucination rate.
-- It does not automatically randomize request order, unload/reload every model, or compute confidence intervals.
+- It does not randomly assign request order (it alternates the selected order by repetition), unload/reload every model for cold-start trials, or compute confidence intervals.
 - It does not provide concurrent-server throughput testing; the built-in runner is serial and primarily represents single-request/edge use.
 
 ## Minimum defensible procedure
