@@ -147,7 +147,7 @@ What is 100 divided by 4? || 25</textarea>
       <div class="limit-grid">
         <div><strong>Client timing</strong><p>TTFT and total latency include local request/runtime overhead. Prompt and generation throughput use Ollama-reported counts and durations.</p></div>
         <div><strong>System and GPU</strong><p>CPU/RAM and NVIDIA GPU/VRAM/power/temperature are system- or device-wide samples, not isolated model consumption. Sampled peaks can miss brief spikes.</p></div>
-        <div><strong>Energy</strong><p>GPU joules are estimated by integrating power samples only when coverage is adequate. They are not whole-laptop energy or model-isolated energy; short requests may have no estimate.</p></div>
+        <div><strong>Energy</strong><p>GPU joules are estimated by integrating whole-device power samples during the request, without subtracting idle power. This is not model-isolated or whole-laptop energy; short requests may have no estimate.</p></div>
         <div><strong>Quality</strong><p>Phrase assertions and normalized text agreement do not measure semantic similarity or establish a hallucination rate. Starter cases are not a validated benchmark dataset.</p></div>
       </div>
       <p class="protocol-link">See the <a href="https://github.com/dis-craft/LLM-observatory/blob/main/docs/benchmark-protocol.md" target="_blank" rel="noreferrer">benchmark protocol</a> and <a href="https://github.com/dis-craft/LLM-observatory/blob/main/docs/measurement-guide.md" target="_blank" rel="noreferrer">measurement guide</a>.</p>
