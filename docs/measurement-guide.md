@@ -1,6 +1,6 @@
 # Measurement Guide
 
-**Purpose:** define exactly what LLM Observatory records, where each value comes from, how it is calculated, and what conclusions it supports.
+**Purpose:** define exactly what LLM Observatory records, where each value comes from, how it is calculated, and what conclusions it supports. See also the [Benchmark Protocol](benchmark-protocol.md) for workload selection and the controlled comparison procedure.
 
 > **Rule:** system/device telemetry is not automatically LLM-only usage. Report measurement scope beside results.
 
@@ -17,6 +17,8 @@
 | GPU temperature (°C) | nvidia-smi → temperature.gpu | Whole GPU/device |
 | GPU power / power limit (W) | nvidia-smi → power.draw, power.limit | Instantaneous device power / reported limit |
 | Sampled GPU energy estimate (J) | Trapezoidal integration of timestamped GPU power samples across the request window | Device-wide estimate only; shown only with ≥2 in-window samples and ≥80% time coverage; not whole-laptop or model-isolated energy |
+| Benchmark environment | OS/platform, Python version, logical/physical CPU counts, total system RAM, Ollama version, installed model metadata and GPU snapshot | Run metadata for reproducibility; GPU snapshot is not request-isolated |
+| Baseline percentage change | (metric - baseline metric) / abs(baseline metric) × 100 | Raw numerical change; interpret direction per metric (latency lower is better; tokens/s higher is better) |
 | GPU SM clock (MHz) | nvidia-smi → clocks.current.sm | Whole GPU/device |
 | Ollama allocation / VRAM allocation | Ollama GET /api/ps → size, size_vram | Runtime-reported loaded-model allocation |
 | CPU-side allocation estimate | max(size - size_vram, 0) | Subtraction-based estimate; not a direct RAM measurement |
@@ -46,13 +48,14 @@
 
 ## 2. How a performance experiment runs
 
-1. Select installed Ollama model tags and enter fixed prompts.
-2. Configure repetitions, warm-up requests, temperature, context length, output-token limit, system prompt and telemetry sampling interval.
-3. The runner processes models, prompts and repetitions **serially**. It sends each prompt as a fresh user message with the configured system prompt.
-4. Warm-up requests are excluded from measured-trial summaries. With the default of one warm-up, the first request commonly warms/loads the model before measured requests.
-5. For every measured request, capture a pre-request snapshot, timestamp the request, collect streamed output and Ollama's final timing/token statistics, then capture an after-request snapshot.
-6. A separate telemetry sampler records system/GPU snapshots while the workload runs. The runner records the count of samples in the request window and peak sampled RAM/VRAM for that window.
-7. Results and configuration are saved to SQLite. The full run contains trials, summaries, telemetry samples and interpretation notes.
+1. Select installed Ollama model tags, choose a reference baseline, and select a workload profile or enter fixed custom prompts.
+2. Workload profiles are Balanced edge workload, Prompt processing (long input/short output), Generation (short input/longer output), and Long-context retrieval. The text presets do not guarantee exact token counts; inspect actual runtime-reported prompt/output token counts.
+3. Configure repetitions, warm-up requests, temperature, context length, output-token limit, system prompt and telemetry sampling interval.
+4. The runner processes models, prompts and repetitions **serially in selected model order**. It sends each prompt as a fresh user message with the configured system prompt. The result records the selected baseline and percentage changes for performance metrics.
+5. Warm-up requests are excluded from measured-trial summaries. With the default of one warm-up, the first request commonly warms/loads the model before measured requests.
+6. For every measured request, capture a pre-request snapshot, timestamp the request, collect streamed output and Ollama's final timing/token statistics, then capture an after-request snapshot.
+7. A separate telemetry sampler records system/GPU snapshots while the workload runs. The runner records the count of samples in the request window and peak sampled RAM/VRAM for that window.
+8. Results and configuration are saved to SQLite. The full run contains trials, summaries, telemetry samples and interpretation notes.
 
 ### Performance formulas
 
@@ -62,6 +65,7 @@ All Ollama duration fields are reported in nanoseconds; the app converts to seco
 - **Generation tokens/second** = eval_count / (eval_duration / 1e9)
 - **TTFT** = first-content-chunk time − request-start time
 - **Client latency** = stream-end time − request-start time
+- **Percentage change from reference baseline** = (model metric − baseline metric) / abs(baseline metric) × 100%. Negative latency change is an improvement; positive tokens/second change is an improvement. Interpret all other metrics using their own better/worse direction.
 - Per-model summaries include completed trial count, median/mean/p95 client latency, median TTFT, and median/mean prompt and generation throughput where values are available.
 
 Runtime-reported total_duration and client-observed client_latency_s are kept as separate fields because their start/end boundaries differ.
