@@ -16,6 +16,7 @@
 | VRAM used / total (MB) | nvidia-smi → memory.used, memory.total | Whole GPU/device |
 | GPU temperature (°C) | nvidia-smi → temperature.gpu | Whole GPU/device |
 | GPU power / power limit (W) | nvidia-smi → power.draw, power.limit | Instantaneous device power / reported limit |
+| Sampled GPU energy estimate (J) | Trapezoidal integration of timestamped GPU power samples across the request window | Device-wide estimate only; shown only with ≥2 in-window samples and ≥80% time coverage; not whole-laptop or model-isolated energy |
 | GPU SM clock (MHz) | nvidia-smi → clocks.current.sm | Whole GPU/device |
 | Ollama allocation / VRAM allocation | Ollama GET /api/ps → size, size_vram | Runtime-reported loaded-model allocation |
 | CPU-side allocation estimate | max(size - size_vram, 0) | Subtraction-based estimate; not a direct RAM measurement |
@@ -34,7 +35,12 @@
 | Median TTFT / prompt tok/s / generation tok/s | Median of valid values from successful requests | A run's observed distribution |
 | Sampled peak RAM / VRAM | Maximum system RAM or device VRAM value among telemetry samples observed during that request's time window | Sampled system/device peak, not model-only peak |
 | Telemetry sample count during request | Count of periodic sampler records timestamped within the request window | Indicates whether the sampling window captured any readings |
-| Promptfoo assertion result | Configured contains, equals, or not-contains assertion against the expected phrase | Basic output regression check |
+| Reference pass rate | Passed native assertions divided by all attempted trials; failed requests count as failures | Depends on reference dataset and assertion rule; not general factuality |
+| Normalized exact-reference-match rate | Output and expected text compared after case, punctuation and whitespace normalization | Exact-text metric, not semantic equivalence |
+| Baseline exact-agreement rate | Matching normalized outputs at the same case/repetition versus the first selected model | Agreement does not establish correctness |
+| Repeated-answer consistency | Per-case share of completed repetitions matching that case’s modal normalized answer, averaged across cases | Available only when repeated outputs exist; exact-text consistency, not meaning |
+| Inference failure rate | Failed request trials divided by attempted quality trials | Runtime/request failures; distinct from wrong answers |
+| Promptfoo assertion result | Configured contains, equals, or not-contains assertion against the expected phrase | Optional external evaluator; basic output regression check |
 | LM Evaluation Harness score/artifacts | Selected task executed through the local OpenAI-compatible chat endpoint | Depends on task, harness version and adapter compatibility |
 | Imported benchmark rows | Parsed CSV/JSON content saved as an external result | External data; not normalized automatically |
 
@@ -67,22 +73,24 @@ Runtime-reported total_duration and client-observed client_latency_s are kept as
 - **Ollama allocation is runtime-reported.** size and size_vram are useful allocation indicators, not a per-layer tensor trace. The CPU-side estimate is not proof of actual CPU RAM used exclusively by weights.
 - **Sampled peaks can miss short spikes.** Sampling at one second is not a guarantee of observing the true maximum. Short requests may have zero telemetry samples inside their measured window.
 - **TTFT is client-observed.** It includes local HTTP setup, queueing/scheduling, model-loading time if incurred, and runtime delay. It is not GPU-kernel start time.
+- **GPU energy is a sampled estimate, not an exact meter.** The runner uses trapezoidal integration over timestamped device-wide `nvidia-smi` power samples. It emits an estimate only when there are at least two samples inside the request window and at least 80% time coverage across adjacent sample intervals. Other GPU workloads still contribute; short requests may have no estimate. This is not whole-laptop energy or isolated model energy.
+- **Native quality checks now run without Promptfoo.** The built-in evaluator repeats each case, scores contains/equals/not-contains reference assertions, computes normalized exact-reference matches and compares each variant against the first selected baseline model. It reports repeat consistency as exact normalized-text consistency, not semantic similarity. The scoring set must be curated and validated by the researcher.
 - **Warm-up and model residency matter.** Ollama can keep models loaded. Control cold/warm conditions explicitly, check ollama ps, and avoid interpreting a warm run as a cold-start measurement. The current runner does not force a clean unload between variants.
 - **Other applications can contaminate the result.** Minimize background work; record system state; repeat runs. A before/after difference is an observed association, not exact model-only attribution.
 - **Observer overhead exists.** The telemetry sampler runs during the workload and consumes some resources.
 - **Different runtimes are not interchangeable.** llama-bench measures llama.cpp, not the exact Ollama backend. Keep backend, version, GPU-offload and build settings with any imported result.
 
-## 4. Not measured by this build
+## 4. Not measured or not fully isolated by this build
 
 | Research variable | Status / next step |
 |---|---|
-| Energy per request / per token | **Not measured.** Integrate power over a defined request window and document baseline treatment. For whole-laptop energy, use a suitable external meter. |
+| Whole-laptop energy per request / per token | **Not measured.** Current estimate integrates GPU-device power only when sampling coverage is adequate. Use an external wall/battery power meter for whole-device energy claims. |
 | Total system energy | **Not measured.** Device GPU power is not wall power or whole-laptop energy. |
 | Isolated LLM GPU utilization / power | **Not guaranteed.** Device-wide readings do not isolate Ollama; process-level GPU capability depends on driver/platform. |
 | Exact peak model-weight memory / per-layer allocation | **Not measured.** Requires deeper runtime instrumentation/profiling. |
 | Memory bandwidth / per-kernel timing | **Not measured.** Use compatible profiling tools where possible. |
 | Separate first-token timestamp at the inference runtime | **Not measured.** Current TTFT is client-observed only. |
-| Validated hallucination rate / factual reliability | **Not measured.** Promptfoo phrase assertions are not a general hallucination metric. Use a fixed reference-backed test set and validated scoring. |
+| Semantic similarity and validated hallucination rate / factual reliability | **Not measured.** Exact normalized-text agreement does not score semantic equivalence; basic assertions are not a general hallucination metric. Use a fixed reference-backed test set and validated scoring. |
 | Statistical significance / confidence intervals | **Not calculated automatically.** Increase repeated trials and analyze variability/uncertainty. |
 | Model-only RAM/VRAM contribution after idle subtraction | **Not claimed.** Baselines are diagnostic, not perfect attribution. |
 
