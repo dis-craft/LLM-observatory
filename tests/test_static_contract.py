@@ -58,6 +58,14 @@ class StaticContractTests(unittest.TestCase):
         self.assertIn('baseline_model: $("#performance-baseline").value', javascript)
         self.assertIn('change_percent_vs_baseline', javascript)
 
+    def test_benchmark_protocol_documents_workload_basis(self):
+        protocol = (ROOT / "docs" / "benchmark-protocol.md").read_text(encoding="utf-8")
+        self.assertIn("Reference", protocol)
+        self.assertIn("Prompt processing", protocol)
+        self.assertIn("Generation", protocol)
+        self.assertIn("Baseline change", protocol)
+        self.assertIn("What this tool does not establish", protocol)
+
     def test_experiment_storage_is_local_and_ignored(self):
         gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
         self.assertIn("data/", gitignore)
