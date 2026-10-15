@@ -1,17 +1,21 @@
+import time
 import unittest
 
 from unittest.mock import patch
 
 from app import (
     NativeEvaluationRequest,
+    PerformanceRequest,
     add_baseline_comparisons,
     PromptfooCase,
     estimate_gpu_energy_joules,
     native_quality_worker,
     normalize_answer,
+    performance_worker,
     reference_assertion_passes,
     start_native_evaluation,
     summarize_quality_trials,
+    summarize_trials,
 )
 
 
@@ -69,6 +73,71 @@ class SampledEnergyTests(unittest.TestCase):
         self.assertEqual(result["sample_count"], 0)
 
 
+class PerformanceSummaryTests(unittest.TestCase):
+    def test_reports_spread_actual_failures_and_token_statistics(self):
+        trials = [
+            {"status": "completed", "client_latency_s": 1.0, "time_to_first_token_s": 0.2,
+             "generation_tokens_per_second": 10.0, "prompt_tokens_per_second": 40.0,
+             "prompt_tokens": 100, "output_tokens": 20, "peak_sampled_vram_mb": 600,
+             "peak_sampled_ram_bytes": 2_000, "gpu_energy_j_estimate": 4.0},
+            {"status": "completed", "client_latency_s": 3.0, "time_to_first_token_s": 0.4,
+             "generation_tokens_per_second": 20.0, "prompt_tokens_per_second": 60.0,
+             "prompt_tokens": 120, "output_tokens": 30, "peak_sampled_vram_mb": 700,
+             "peak_sampled_ram_bytes": 3_000, "gpu_energy_j_estimate": None},
+            {"status": "failed", "error": "synthetic failure"},
+        ]
+        result = summarize_trials(trials)
+        self.assertEqual(result["attempted_trials"], 3)
+        self.assertEqual(result["completed_trials"], 2)
+        self.assertEqual(result["failed_trials"], 1)
+        self.assertEqual(result["latency_median_s"], 2.0)
+        self.assertEqual(result["latency_stddev_s"], 1.0)
+        self.assertEqual(result["generation_tokens_per_second_stddev"], 5.0)
+        self.assertEqual(result["peak_sampled_vram_mb"], 700)
+        self.assertEqual(result["peak_sampled_system_ram_bytes"], 3000)
+        self.assertEqual(result["gpu_energy_j_median_estimate"], 4.0)
+
+    def test_single_trial_does_not_claim_variability(self):
+        result = summarize_trials([{ "status": "completed", "client_latency_s": 0.2,
+                                     "generation_tokens_per_second": 25.0 }])
+        self.assertIsNone(result["latency_stddev_s"])
+        self.assertIsNone(result["generation_tokens_per_second_stddev"])
+
+class PairedPerformanceOrderTests(unittest.TestCase):
+    def test_repetition_order_alternates_for_each_matched_prompt(self):
+        calls = []
+        config = {
+            "models": ["model-A", "model-B"], "baseline_model": "model-A",
+            "prompts": ["same prompt"], "repetitions": 2, "warmups": 0,
+            "temperature": 0.0, "context_length": 512, "max_tokens": 32,
+            "system_prompt": "Answer briefly.", "sample_interval_s": 0.5,
+            "workload_profile": "custom",
+        }
+
+        def fake_stream(model, prompt, system_prompt, temperature, context_length, max_tokens):
+            calls.append((model, prompt))
+            return {"output": "ok", "prompt_tokens": 2, "output_tokens": 1,
+                    "prompt_eval_duration_s": 0.1, "generation_duration_s": 0.1,
+                    "model_load_duration_s": 0.0, "prompt_tokens_per_second": 20.0,
+                    "generation_tokens_per_second": 10.0, "time_to_first_token_s": 0.05,
+                    "client_latency_s": 0.2}
+
+        def fake_telemetry():
+            return {"timestamp": "test", "monotonic_s": time.perf_counter(),
+                    "cpu_utilization_pct": 10.0, "ram_used_bytes": 1000, "gpu": None}
+
+        with patch("app.stream_chat", side_effect=fake_stream), \\
+             patch("app.collect_telemetry", side_effect=fake_telemetry), \\
+             patch("app.benchmark_environment", return_value={"models": [], "gpu_snapshot": None}), \\
+             patch("app.db_update"):
+            result = performance_worker("test-run", config)
+
+        self.assertEqual(calls, [
+            ("model-A", "same prompt"), ("model-B", "same prompt"),
+            ("model-B", "same prompt"), ("model-A", "same prompt"),
+        ])
+        self.assertEqual(result["summary_by_model"]["model-A"]["completed_trials"], 2)
+        self.assertEqual(result["baseline_model"], "model-A")
 class PerformanceBaselineComparisonTests(unittest.TestCase):
     def test_percent_changes_use_baseline_and_keep_direction_neutral(self):
         summaries = {
@@ -126,7 +195,7 @@ class NativeWorkerTests(unittest.TestCase):
                 "generation_tokens_per_second": 15.0,
             }
 
-        with patch("app.stream_chat", side_effect=fake_stream_chat), patch("app.db_update"):
+        with patch("app.stream_chat", side_effect=fake_stream_chat), patch("app.db_update"), patch("app.benchmark_environment", return_value={}):
             result = native_quality_worker("unit-test", config)
 
         self.assertEqual(result["baseline_model"], "baseline")
