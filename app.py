@@ -1091,7 +1091,7 @@ def start_performance(body: PerformanceRequest) -> dict[str, Any]:
     ensure_valid_models(body.models)
     if body.baseline_model is not None and body.baseline_model not in body.models:
         raise HTTPException(status_code=400, detail="The performance baseline must also be selected for the benchmark.")
-    if body.workload_profile not in {"balanced", "prefill", "decode", "retrieval", "custom"}:
+    if body.workload_profile not in {"balanced", "prefill", "decode", "retrieval", "long", "custom"}:
         raise HTTPException(status_code=400, detail="Choose a supported workload profile or custom prompts.")
     prompts = [prompt.strip() for prompt in body.prompts if prompt.strip()]
     if not prompts:
