@@ -419,6 +419,50 @@ def quantile(values: list[float], q: float) -> float | None:
     return valid[low] * (high - pos) + valid[high] * (pos - low)
 
 
+def add_baseline_comparisons(
+    summaries: dict[str, dict[str, Any]], baseline_model: str
+) -> dict[str, dict[str, Any]]:
+    """Attach raw percent changes for selected performance metrics vs baseline."""
+    lower_is_better = {
+        "latency_median_s",
+        "latency_p95_s",
+        "ttft_median_s",
+        "peak_sampled_vram_mb",
+        "peak_sampled_system_ram_bytes",
+        "gpu_energy_j_median_estimate",
+    }
+    metric_keys = [
+        "latency_median_s",
+        "latency_p95_s",
+        "ttft_median_s",
+        "generation_tokens_per_second_median",
+        "prompt_tokens_per_second_median",
+        "peak_sampled_vram_mb",
+        "peak_sampled_system_ram_bytes",
+        "gpu_energy_j_median_estimate",
+    ]
+    reference = summaries.get(baseline_model) or {}
+    for model, metrics in summaries.items():
+        changes = {}
+        for key in metric_keys:
+            current = metrics.get(key)
+            baseline = reference.get(key)
+            if (
+                isinstance(current, (int, float))
+                and isinstance(baseline, (int, float))
+                and math.isfinite(float(current))
+                and math.isfinite(float(baseline))
+                and baseline != 0
+            ):
+                changes[key] = (float(current) - float(baseline)) / abs(float(baseline)) * 100
+            else:
+                changes[key] = None
+        metrics["baseline_model"] = baseline_model
+        metrics["change_percent_vs_baseline"] = changes
+        metrics["lower_is_better_metrics"] = sorted(lower_is_better)
+    return summaries
+
+
 def summarize_trials(trials: list[dict[str, Any]]) -> dict[str, Any]:
     def vals(key: str) -> list[float]:
         return [float(row[key]) for row in trials if isinstance(row.get(key), (int, float)) and math.isfinite(float(row[key]))]
@@ -508,6 +552,7 @@ def stream_chat(model: str, prompt: str, system_prompt: str, temperature: float,
 
 class PerformanceRequest(BaseModel):
     models: list[str] = Field(min_length=1, max_length=8)
+    baseline_model: str | None = None
     prompts: list[str] = Field(min_length=1, max_length=30)
     repetitions: int = Field(default=5, ge=1, le=50)
     warmups: int = Field(default=1, ge=0, le=3)
@@ -678,8 +723,11 @@ def performance_worker(experiment_id: str, config: dict[str, Any]) -> dict[str, 
     for model in config["models"]:
         subset = [row for row in trials if row["model"] == model and row["status"] == "completed"]
         by_model[model] = summarize_trials(subset)
+    baseline_model = config.get("baseline_model") or config["models"][0]
+    add_baseline_comparisons(by_model, baseline_model)
     return {
         "config": config,
+        "baseline_model": baseline_model,
         "summary_by_model": by_model,
         "trials": trials,
         "errors": errors,
@@ -914,12 +962,15 @@ def chat(body: dict[str, Any]) -> dict[str, Any]:
 @app.post("/api/experiments/performance")
 def start_performance(body: PerformanceRequest) -> dict[str, Any]:
     ensure_valid_models(body.models)
+    if body.baseline_model is not None and body.baseline_model not in body.models:
+        raise HTTPException(status_code=400, detail="The performance baseline must also be selected for the benchmark.")
     prompts = [prompt.strip() for prompt in body.prompts if prompt.strip()]
     if not prompts:
         raise HTTPException(status_code=400, detail="Add at least one non-empty prompt.")
     if len(body.models) * len(prompts) * body.repetitions > 1000:
         raise HTTPException(status_code=400, detail="This run would exceed 1,000 measured requests. Reduce models, prompts or repetitions.")
     config = body.model_dump()
+    config["baseline_model"] = body.baseline_model or body.models[0]
     config["prompts"] = prompts
     experiment_id = begin_job("performance", config, performance_worker)
     return {"experiment_id": experiment_id, "status": "queued"}
