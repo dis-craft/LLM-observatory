@@ -4,6 +4,7 @@ import csv
 import json
 import math
 import os
+import platform
 import re
 import shutil
 import sqlite3
@@ -147,6 +148,31 @@ def list_model_tags() -> list[dict[str, Any]]:
             "format": details.get("format"),
         })
     return items
+
+
+def benchmark_environment(model_names: list[str]) -> dict[str, Any]:
+    """Capture reproducibility metadata outside measured request windows."""
+    try:
+        version_response = requests.get(OLLAMA_HOST + "/api/version", timeout=2)
+        version_response.raise_for_status()
+        ollama_version = version_response.json().get("version")
+    except requests.RequestException:
+        ollama_version = None
+
+    available = {item["name"]: item for item in list_model_tags()} if ollama_version else {}
+    return {
+        "captured_at": now_iso(),
+        "platform": platform.platform(),
+        "python_version": platform.python_version(),
+        "logical_cpu_count": psutil.cpu_count(logical=True),
+        "physical_cpu_count": psutil.cpu_count(logical=False),
+        "system_ram_total_bytes": psutil.virtual_memory().total,
+        "ollama_host": OLLAMA_HOST,
+        "ollama_version": ollama_version,
+        "models": [available[name] for name in model_names if name in available],
+        "gpu_snapshot": gpu_snapshot(),
+        "scope_note": "Environment metadata and GPU snapshot are recorded for reproducibility; they are not per-request model-only measurements.",
+    }
 
 
 def gpu_snapshot() -> dict[str, Any] | None:
@@ -627,6 +653,7 @@ def begin_job(kind: str, config: dict[str, Any], worker) -> str:
 
 
 def performance_worker(experiment_id: str, config: dict[str, Any]) -> dict[str, Any]:
+    environment = benchmark_environment(config["models"])
     trials: list[dict[str, Any]] = []
     telemetry_samples: list[dict[str, Any]] = []
     stop_sampling = threading.Event()
@@ -727,6 +754,7 @@ def performance_worker(experiment_id: str, config: dict[str, Any]) -> dict[str, 
     add_baseline_comparisons(by_model, baseline_model)
     return {
         "config": config,
+        "environment": environment,
         "baseline_model": baseline_model,
         "summary_by_model": by_model,
         "trials": trials,
@@ -744,6 +772,7 @@ def performance_worker(experiment_id: str, config: dict[str, Any]) -> dict[str, 
 
 
 def native_quality_worker(experiment_id: str, config: dict[str, Any]) -> dict[str, Any]:
+    environment = benchmark_environment(config["models"])
     trials: list[dict[str, Any]] = []
     total = len(config["models"]) * len(config["cases"]) * config["repetitions"]
     for model in config["models"]:
@@ -785,6 +814,7 @@ def native_quality_worker(experiment_id: str, config: dict[str, Any]) -> dict[st
                 db_update(experiment_id, progress=min(99, len(trials) / max(total, 1) * 100))
     return {
         "config": config,
+        "environment": environment,
         "baseline_model": config["baseline_model"],
         "summary_by_model": summarize_quality_trials(
             trials, config["models"], len(config["cases"]), config["repetitions"], config["baseline_model"]
