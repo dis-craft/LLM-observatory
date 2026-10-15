@@ -157,6 +157,7 @@
       renderModelOptions("quality-models", ["q2", "q4"]);
       updateModelSelect("lm-eval-model");
     updateModelSelect("quality-baseline");
+    updateModelSelect("performance-baseline");
       $("#runtime-model-count").textContent = state.models.length ? String(state.models.length) + " installed" : "None detected";
     } catch (error) {
       state.models = [];
@@ -531,10 +532,12 @@
       body += '</div><p class="inline-tool-note">' + (result.trials ? result.trials.length : 0) + ' quality trial(s). Repeat consistency is unavailable for single-run tests. Run quality and performance benchmarks separately.</p>';
       if (result.trials) body += '<details class="job-log"><summary>View answer-by-answer results</summary><pre>' + escapeHtml(JSON.stringify(result.trials, null, 2)) + '</pre></details>';
     } else if (experiment.kind === "performance" && result.summary_by_model) {
-      body += '<div class="result-kpis">';
+      body += '<p class="inline-tool-note">Reference baseline: ' + escapeHtml(shortModel(result.baseline_model || "")) + '. Changes are percentages relative to this model; lower latency is better, while higher tokens/s is better.</p><div class="result-kpis">';
       Object.keys(result.summary_by_model).forEach(function (model) {
         const metrics = result.summary_by_model[model];
-        body += '<div class="result-kpi"><span>' + escapeHtml(shortModel(model)) + ' · MEDIAN GENERATION</span><strong>' + (metrics.generation_tokens_per_second_median == null ? "—" : fmtNumber(metrics.generation_tokens_per_second_median, 2) + " tok/s") + '</strong><span>Median latency ' + (metrics.latency_median_s == null ? "—" : fmtNumber(metrics.latency_median_s, 2) + " s") + '</span><span>TTFT ' + (metrics.ttft_median_s == null ? "—" : fmtNumber(metrics.ttft_median_s, 2) + " s") + '</span><span>Estimated GPU energy ' + (metrics.gpu_energy_j_median_estimate == null ? "Not enough samples" : fmtNumber(metrics.gpu_energy_j_median_estimate, 2) + " J") + '</span><span>Estimates available for ' + escapeHtml(metrics.gpu_energy_estimated_trials == null ? "—" : metrics.gpu_energy_estimated_trials + " trial(s)") + '</span></div>';
+        const changes = metrics.change_percent_vs_baseline || {};
+        const delta = (key) => changes[key] == null ? "—" : (changes[key] > 0 ? "+" : "") + fmtNumber(changes[key], 1) + "%";
+        body += '<div class="result-kpi"><span>' + escapeHtml(shortModel(model)) + '</span><strong>' + (metrics.generation_tokens_per_second_median == null ? "—" : fmtNumber(metrics.generation_tokens_per_second_median, 2) + " tok/s") + '</strong><span>Generation speed vs baseline ' + delta("generation_tokens_per_second_median") + '</span><span>Median latency ' + (metrics.latency_median_s == null ? "—" : fmtNumber(metrics.latency_median_s, 2) + " s") + ' (' + delta("latency_median_s") + ')</span><span>TTFT ' + (metrics.ttft_median_s == null ? "—" : fmtNumber(metrics.ttft_median_s, 2) + " s") + '</span><span>Median input/output tokens ' + (metrics.prompt_tokens_median == null ? "—" : fmtNumber(metrics.prompt_tokens_median, 0)) + ' / ' + (metrics.output_tokens_median == null ? "—" : fmtNumber(metrics.output_tokens_median, 0)) + '</span><span>Peak sampled VRAM ' + (metrics.peak_sampled_vram_mb == null ? "—" : fmtNumber(metrics.peak_sampled_vram_mb, 0) + " MB") + '</span><span>Estimated GPU energy ' + (metrics.gpu_energy_j_median_estimate == null ? "Not enough samples" : fmtNumber(metrics.gpu_energy_j_median_estimate, 2) + " J") + '</span><span>Energy estimates: ' + escapeHtml(metrics.gpu_energy_estimated_trials == null ? "—" : metrics.gpu_energy_estimated_trials + "/" + metrics.gpu_energy_total_completed_trials + " trials") + '</span></div>';
       });
       body += '</div><p class="inline-tool-note">' + (result.trials ? result.trials.length : 0) + ' measured request(s). RAM/VRAM are sampled and shared-device. GPU energy is an estimate shown only when sample coverage is sufficient; it is not model-isolated or whole-laptop energy.</p>'; 
       if (result.errors && result.errors.length) body += '<pre>' + escapeHtml(JSON.stringify(result.errors, null, 2)) + '</pre>';
@@ -692,8 +695,10 @@
     clearAlert();
     const button = $("#start-performance");
     const models = getSelectedModels("performance-models");
+    const baselineModel = $("#performance-baseline").value;
     const prompts = $("#performance-prompts").value.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
     if (!models.length) { showToast("Select at least one model variant.", "error"); return; }
+    if (!models.includes(baselineModel)) { showToast("Check the reference baseline in the selected variants list.", "error"); return; }
     if (!prompts.length) { showToast("Enter at least one prompt.", "error"); return; }
     const repetitions = Number($("#performance-repetitions").value);
     if (models.length * prompts.length * repetitions > 1000) {
@@ -704,7 +709,7 @@
       const response = await api("/api/experiments/performance", {
         method: "POST",
         body: JSON.stringify({
-          models: models, prompts: prompts,
+          models: models, baseline_model: $("#performance-baseline").value, prompts: prompts,
           repetitions: repetitions,
           warmups: Number($("#performance-warmups").value),
           temperature: Number($("#performance-temperature").value),
