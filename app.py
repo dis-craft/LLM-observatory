@@ -283,7 +283,7 @@ def tool_status() -> dict[str, Any]:
 
 def normalize_answer(value: str) -> str:
     """Normalize casing, punctuation and whitespace for exact-text comparisons."""
-    return " ".join(re.sub(r"[^\\w\\s]", "", (value or "").casefold()).split())
+    return " ".join(re.sub(r"[^\w\s]", "", (value or "").casefold()).split())
 
 
 def reference_assertion_passes(output: str, expected: str, assertion: str) -> bool:
