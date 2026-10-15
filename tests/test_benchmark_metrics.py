@@ -1,9 +1,15 @@
 import unittest
 
+from unittest.mock import patch
+
 from app import (
+    NativeEvaluationRequest,
+    PromptfooCase,
     estimate_gpu_energy_joules,
+    native_quality_worker,
     normalize_answer,
     reference_assertion_passes,
+    start_native_evaluation,
     summarize_quality_trials,
 )
 
@@ -60,6 +66,53 @@ class SampledEnergyTests(unittest.TestCase):
         )
         self.assertIsNone(result["energy_j"])
         self.assertEqual(result["sample_count"], 0)
+
+
+class NativeWorkerTests(unittest.TestCase):
+    def test_worker_compares_repeated_answers_against_explicit_baseline(self):
+        config = {
+            "models": ["baseline", "quant"],
+            "baseline_model": "baseline",
+            "cases": [{"question": "What is 6 times 7?", "expected": "42", "assertion": "contains"}],
+            "repetitions": 2,
+            "system_prompt": "Answer briefly.",
+            "temperature": 0.0,
+            "context_length": 512,
+            "max_tokens": 32,
+        }
+
+        def fake_stream_chat(model, prompt, system_prompt, temperature, context_length, max_tokens):
+            output = "42" if model == "baseline" else "The answer is 42"
+            return {
+                "output": output,
+                "output_tokens": 3,
+                "time_to_first_token_s": 0.05,
+                "client_latency_s": 0.2,
+                "generation_tokens_per_second": 15.0,
+            }
+
+        with patch("app.stream_chat", side_effect=fake_stream_chat), patch("app.db_update"):
+            result = native_quality_worker("unit-test", config)
+
+        self.assertEqual(result["baseline_model"], "baseline")
+        self.assertEqual(result["summary_by_model"]["baseline"]["assertion_pass_rate"], 1.0)
+        self.assertEqual(result["summary_by_model"]["quant"]["assertion_pass_rate"], 1.0)
+        self.assertEqual(result["summary_by_model"]["quant"]["baseline_exact_agreement_rate"], 0.0)
+        self.assertEqual(result["summary_by_model"]["quant"]["repeat_consistency_rate"], 1.0)
+        self.assertEqual(len(result["trials"]), 4)
+
+    def test_api_starts_native_quality_job_without_external_evaluator(self):
+        request = NativeEvaluationRequest(
+            models=["baseline", "quant"],
+            baseline_model="baseline",
+            cases=[PromptfooCase(question="What is 6 times 7?", expected="42", assertion="contains")],
+            repetitions=2,
+        )
+        with patch("app.ensure_valid_models"), patch("app.begin_job", return_value="test-job") as begin:
+            result = start_native_evaluation(request)
+        self.assertEqual(result, {"experiment_id": "test-job", "status": "queued"})
+        self.assertEqual(begin.call_args.args[0], "native_quality")
+        self.assertEqual(begin.call_args.args[1]["baseline_model"], "baseline")
 
 
 class QualitySummaryTests(unittest.TestCase):
