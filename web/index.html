@@ -112,7 +112,7 @@
               <div id="performance-models" class="model-select-list"><div class="empty-state">Load models from Ollama to continue.</div></div>
               <div class="form-divider"></div>
               <div class="form-section-title"><span class="step-number">02</span><div><h3>Define the workload</h3><p>Each prompt is sent independently, in sequence, to each selected variant.</p></div></div>
-              <label class="field-label" for="performance-prompts">Prompts <span class="field-hint">One prompt per line</span></label>
+              <label class="field"><span class="field-label" for="workload-profile">Benchmark workload</span><select id="workload-profile"><option value="balanced" selected>Balanced edge workload</option><option value="prefill">Prompt processing · long input, short answer</option><option value="decode">Generation · short input, long answer</option><option value="retrieval">Long-context retrieval</option><option value="custom">Custom prompts</option></select><span id="workload-description" class="field-hint">Mixed short questions; same prompts are used for every selected model.</span></label><label class="field-label" for="performance-prompts">Prompts <span class="field-hint">One prompt per line</span></label>
               <textarea id="performance-prompts" rows="5" required>Explain why the sky appears blue in two sentences.
 What is the difference between RAM and VRAM?
 Solve step by step: if 3x + 5 = 20, what is x? Explain briefly.</textarea>
@@ -126,7 +126,7 @@ Solve step by step: if 3x + 5 = 20, what is x? Explain briefly.</textarea>
                 <label class="field"><span class="field-label">Temperature <output id="temperature-value">0.0</output></span><input id="performance-temperature" type="range" min="0" max="1" step="0.1" value="0"><span class="range-labels"><span>Deterministic</span><span>More variable</span></span></label>
               </div>
               <label class="field-label" for="performance-system">System prompt</label><textarea id="performance-system" rows="2">You are a helpful assistant. Answer the prompt clearly and accurately.</textarea>
-              <div class="form-footer"><div class="form-hint-block"><span class="info-icon">i</span><span>Requests run sequentially. Hardware sampling is approximate and may miss short peaks.</span></div><button class="button button-primary" type="submit" id="start-performance"><span>▶</span> Run performance experiment</button></div>
+              <div class="form-footer"><div class="form-hint-block"><span class="info-icon">i</span><span>Requests run sequentially. Actual prompt/output token counts are recorded; resource samples can miss short peaks.</span></div><button class="button button-primary" type="submit" id="start-performance"><span>▶</span> Run performance experiment</button></div>
             </form>
             <section id="performance-job" class="panel job-panel hidden" aria-live="polite"><div class="panel-heading"><div><h3 id="performance-job-title">Experiment queued</h3><p id="performance-job-subtitle">Preparing measurements</p></div><span class="job-state" id="performance-job-state">QUEUED</span></div><div class="progress-track job-progress"><span class="progress-fill fill-green" id="performance-job-progress" style="width:0%"></span></div><div class="job-meta"><span id="performance-job-progress-label">0% complete</span><span id="performance-job-id"></span></div><div id="performance-job-result" class="job-result hidden"></div></section>
           </div>
