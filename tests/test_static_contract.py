@@ -43,20 +43,24 @@ class StaticContractTests(unittest.TestCase):
                          "/api/experiments/performance", "/api/evaluations/native", "/api/evaluations/promptfoo",
                          "/api/experiments", "/api/results/import"}.issubset(routes))
 
-    def test_quality_benchmark_controls_are_wired(self):
+    def test_single_dashboard_workflow_is_wired(self):
         html = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
         javascript = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
-        self.assertIn('id="quality-baseline"', html)
-        self.assertIn('id="quality-repetitions"', html)
-        self.assertIn('id="performance-baseline"', html)
-        self.assertIn('id="workload-profile"', html)
-        self.assertIn('value="prefill"', html)
-        self.assertIn('value="decode"', html)
-        self.assertIn('value="retrieval"', html)
+        for required in [
+            'id="model-choices"', 'id="baseline-model"', 'id="workload-profile"',
+            'value="balanced"', 'value="prefill"', 'value="decode"',
+            'value="retrieval"', 'value="long"', 'id="performance-repetitions"',
+            'id="performance-warmups"', 'id="sample-interval"',
+            'id="start-performance"', 'id="start-quality"',
+            'id="performance-results"', 'id="quality-results"', 'id="history-rows"',
+        ]:
+            self.assertIn(required, html)
+        self.assertIn('/api/experiments/performance', javascript)
         self.assertIn('/api/evaluations/native', javascript)
-        self.assertIn('baseline_model: baselineModel', javascript)
-        self.assertIn('baseline_model: $("#performance-baseline").value', javascript)
+        self.assertIn('baseline_model: state.baseline', javascript)
         self.assertIn('change_percent_vs_baseline', javascript)
+        self.assertIn('latency_stddev_s', javascript)
+        self.assertIn('gpu_energy_j_median_estimate', javascript)
 
     def test_benchmark_protocol_documents_workload_basis(self):
         protocol = (ROOT / "docs" / "benchmark-protocol.md").read_text(encoding="utf-8")
