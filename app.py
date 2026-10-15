@@ -730,7 +730,7 @@ def native_quality_worker(experiment_id: str, config: dict[str, Any]) -> dict[st
         "notes": [
             "Assertion pass rate measures only the chosen rule against each reference; it is not a general factuality or hallucination score.",
             "Exact reference match is normalized text equality (case, punctuation and whitespace normalized), not semantic equivalence.",
-            "Baseline agreement is normalized exact-text agreement with the first selected model, not proof that either answer is correct.",
+            "Baseline agreement is normalized exact-text agreement with the explicitly configured baseline model, not proof that either answer is correct.",
             "Repeat consistency is the share of a case's repeated completed answers matching its modal normalized answer. Use repetitions greater than one.",
             "Run quality evaluation separately from performance measurement to avoid resource contention.",
         ],
