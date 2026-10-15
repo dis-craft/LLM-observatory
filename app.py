@@ -512,7 +512,6 @@ def summarize_trials(trials: list[dict[str, Any]]) -> dict[str, Any]:
         return statistics.median(values) if values else None
 
     def stddev(values: list[float]) -> float | None:
-        # Do not imply a measured variability estimate from a single trial.
         return statistics.pstdev(values) if len(values) >= 2 else None
 
     def cv_pct(values: list[float]) -> float | None:
@@ -522,6 +521,20 @@ def summarize_trials(trials: list[dict[str, Any]]) -> dict[str, Any]:
         if average == 0:
             return None
         return statistics.pstdev(values) / abs(average) * 100.0
+
+    def within_prompt_stddev(key: str) -> float | None:
+        # Estimate run-to-run spread within the same prompt, rather than
+        # treating differences between prompt difficulty as pure run variability.
+        grouped: dict[int, list[float]] = {}
+        for row in successful:
+            value = row.get(key)
+            if isinstance(value, (int, float)) and math.isfinite(float(value)):
+                prompt_index = int(row.get("prompt_index", -1))
+                grouped.setdefault(prompt_index, []).append(float(value))
+        per_prompt = [
+            statistics.pstdev(values) for values in grouped.values() if len(values) >= 2
+        ]
+        return statistics.mean(per_prompt) if per_prompt else None
 
     latencies = vals("client_latency_s")
     generation_speed = vals("generation_tokens_per_second")
@@ -538,6 +551,11 @@ def summarize_trials(trials: list[dict[str, Any]]) -> dict[str, Any]:
     sampled_gpu = vals("peak_sampled_gpu_utilization_pct")
     sampled_gpu_power = vals("peak_sampled_gpu_power_w")
     sampled_gpu_temp = vals("peak_sampled_gpu_temperature_c")
+    sampled_gpu_clock = vals("peak_sampled_gpu_sm_clock_mhz")
+    ollama_rss = vals("peak_sampled_ollama_rss_bytes")
+    ollama_cpu = vals("peak_sampled_ollama_cpu_pct")
+    ollama_alloc = vals("peak_sampled_ollama_allocation_bytes")
+    ollama_vram_alloc = vals("peak_sampled_ollama_vram_allocation_bytes")
     gpu_energy = vals("gpu_energy_j_estimate")
     return {
         "attempted_trials": len(trials),
@@ -546,13 +564,16 @@ def summarize_trials(trials: list[dict[str, Any]]) -> dict[str, Any]:
         "latency_median_s": median(latencies),
         "latency_mean_s": mean(latencies),
         "latency_stddev_s": stddev(latencies),
+        "latency_within_prompt_stddev_mean_s": within_prompt_stddev("client_latency_s"),
         "latency_cv_pct": cv_pct(latencies),
         "latency_p95_s": quantile(latencies, 0.95),
         "ttft_median_s": median(ttft),
         "ttft_stddev_s": stddev(ttft),
+        "ttft_within_prompt_stddev_mean_s": within_prompt_stddev("time_to_first_token_s"),
         "generation_tokens_per_second_median": median(generation_speed),
         "generation_tokens_per_second_mean": mean(generation_speed),
         "generation_tokens_per_second_stddev": stddev(generation_speed),
+        "generation_tokens_per_second_within_prompt_stddev_mean": within_prompt_stddev("generation_tokens_per_second"),
         "generation_tokens_per_second_cv_pct": cv_pct(generation_speed),
         "prompt_tokens_per_second_median": median(prompt_speed),
         "prompt_tokens_per_second_mean": mean(prompt_speed),
@@ -568,6 +589,11 @@ def summarize_trials(trials: list[dict[str, Any]]) -> dict[str, Any]:
         "peak_sampled_gpu_utilization_pct": max(sampled_gpu) if sampled_gpu else None,
         "peak_sampled_gpu_power_w": max(sampled_gpu_power) if sampled_gpu_power else None,
         "peak_sampled_gpu_temperature_c": max(sampled_gpu_temp) if sampled_gpu_temp else None,
+        "peak_sampled_gpu_sm_clock_mhz": max(sampled_gpu_clock) if sampled_gpu_clock else None,
+        "peak_sampled_ollama_rss_bytes": max(ollama_rss) if ollama_rss else None,
+        "peak_sampled_ollama_cpu_pct": max(ollama_cpu) if ollama_cpu else None,
+        "peak_sampled_ollama_allocation_bytes": max(ollama_alloc) if ollama_alloc else None,
+        "peak_sampled_ollama_vram_allocation_bytes": max(ollama_vram_alloc) if ollama_vram_alloc else None,
         "gpu_energy_j_median_estimate": median(gpu_energy),
         "gpu_energy_j_mean_estimate": mean(gpu_energy),
         "gpu_energy_estimated_trials": len(gpu_energy),
@@ -788,6 +814,11 @@ def performance_worker(experiment_id: str, config: dict[str, Any]) -> dict[str, 
                         "peak_sampled_gpu_utilization_pct": max((g.get("utilization_pct") for g in gpu_samples if isinstance(g.get("utilization_pct"), (int, float))), default=None),
                         "peak_sampled_gpu_power_w": max((g.get("power_w") for g in gpu_samples if isinstance(g.get("power_w"), (int, float))), default=None),
                         "peak_sampled_gpu_temperature_c": max((g.get("temperature_c") for g in gpu_samples if isinstance(g.get("temperature_c"), (int, float))), default=None),
+                        "peak_sampled_gpu_sm_clock_mhz": max((g.get("sm_clock_mhz") for g in gpu_samples if isinstance(g.get("sm_clock_mhz"), (int, float))), default=None),
+                        "peak_sampled_ollama_rss_bytes": max((sample.get("ollama_process_rss_bytes") for sample in relevant if isinstance(sample.get("ollama_process_rss_bytes"), (int, float))), default=None),
+                        "peak_sampled_ollama_cpu_pct": max((sample.get("ollama_process_cpu_pct") for sample in relevant if isinstance(sample.get("ollama_process_cpu_pct"), (int, float))), default=None),
+                        "peak_sampled_ollama_allocation_bytes": max((sample.get("ollama_allocated_bytes") for sample in relevant if isinstance(sample.get("ollama_allocated_bytes"), (int, float)) and sample.get("ollama_allocated_bytes") > 0), default=None),
+                        "peak_sampled_ollama_vram_allocation_bytes": max((sample.get("ollama_vram_allocated_bytes") for sample in relevant if isinstance(sample.get("ollama_vram_allocated_bytes"), (int, float)) and sample.get("ollama_vram_allocated_bytes") > 0), default=None),
                         "gpu_energy_j_estimate": energy["energy_j"],
                         "gpu_energy_coverage_fraction": energy["coverage_fraction"],
                         "gpu_energy_sample_count": energy["sample_count"],
@@ -825,6 +856,8 @@ def performance_worker(experiment_id: str, config: dict[str, Any]) -> dict[str, 
             "Estimated GPU-device energy is reported only when sampled power covers at least 80% of the request window and at least two samples fall inside it; it is not model-isolated or whole-laptop energy.",
             "Short requests may finish between telemetry samples; peak sampled memory can therefore miss brief spikes.",
             "Quality is not inferred from performance measurements. Run a quality evaluation separately.",
+            "Measured requests are paired by prompt/repetition; model order alternates each repetition to reduce simple order bias, but thermal and background effects can still remain.",
+            "Standard deviations across all prompts include prompt-to-prompt differences; within-prompt standard deviations are also reported where repeat counts allow them.",
         ],
     }
 
