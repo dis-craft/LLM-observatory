@@ -21,7 +21,6 @@ Each comparison needs four explicit pieces:
 - **Prompt processing:** longer synthetic log context, short output cap; useful for examining prompt-prefill behaviour. This is a generated test workload, not a real external dataset.
 - **Generation:** short instruction, higher output-token cap; useful for examining decode behaviour. The model may stop early, so use the actual output-token count.
 - **Long input + long answer:** synthetic log context and a higher output cap; combines prompt processing with sustained generation.
-- **Long input + long answer:** synthetic log context and a higher output cap; combines prompt processing with sustained generation.
 - **Long-context retrieval:** synthetic records containing a planted lookup code; useful for controlled retrieval stress tests, not as a factual-knowledge benchmark.
 - **Custom prompts:** the researcher's own fixed workload.
 
@@ -35,7 +34,7 @@ The text-based presets are reproducible prompts, **not exact token-length guaran
 - **Generation throughput:** runtime-reported generated tokens divided by runtime-reported generation duration.
 - **Model load duration:** load duration reported by Ollama; the runner does not force an unload before every trial.
 - **Memory:** model file size is read from Ollama; current and peak sampled RAM/VRAM are whole-system/device samples. Ollama runtime allocation is also recorded separately when available.
-- **GPU energy estimate:** trapezoidal integration of device-wide `nvidia-smi` power readings. An estimate is displayed only if at least two readings are inside the request window and usable intervals cover at least 80% of the request duration. It is not isolated model energy or whole-laptop energy; concurrent GPU work and sampling gaps can affect it.
+- **GPU energy estimate:** trapezoidal integration of device-wide `nvidia-smi` power readings during the request, without subtracting idle power. An estimate is displayed only if at least two readings are inside the request window and usable intervals cover at least 80% of the request duration. It is gross device-wide energy during that interval, not incremental/model-isolated energy or whole-laptop energy; concurrent GPU work and sampling gaps can affect it.
 - **Baseline change:** `(model metric - baseline metric) / abs(baseline metric) × 100%`. Negative latency change means less latency; positive tokens/second change means higher throughput. The sign is the raw numerical change, so interpret it with the direction of each metric.
 - **Variability:** report median, mean and p95 client latency, median TTFT, standard deviation across all successful trials, and average within-prompt standard deviation where at least two repetitions exist. Overall standard deviation mixes prompt difficulty with run-to-run variation; within-prompt standard deviation better isolates observed repetition spread. Confidence intervals and statistical significance are not calculated automatically.
 
