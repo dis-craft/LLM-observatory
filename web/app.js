@@ -709,7 +709,7 @@
       const response = await api("/api/experiments/performance", {
         method: "POST",
         body: JSON.stringify({
-          models: models, baseline_model: $("#performance-baseline").value, prompts: prompts,
+          models: models, baseline_model: $("#performance-baseline").value, workload_profile: $("#workload-profile").value, prompts: prompts,
           repetitions: repetitions,
           warmups: Number($("#performance-warmups").value),
           temperature: Number($("#performance-temperature").value),
