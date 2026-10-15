@@ -159,7 +159,10 @@ def benchmark_environment(model_names: list[str]) -> dict[str, Any]:
     except requests.RequestException:
         ollama_version = None
 
-    available = {item["name"]: item for item in list_model_tags()} if ollama_version else {}
+    try:
+        available = {item["name"]: item for item in list_model_tags()} if ollama_version else {}
+    except HTTPException:
+        available = {}
     return {
         "captured_at": now_iso(),
         "platform": platform.platform(),
