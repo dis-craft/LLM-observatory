@@ -4,6 +4,10 @@ A local-first research workspace for **Performance and Reliability Analysis of Q
 
 > **Status:** Research prototype. It has not been validated on every Windows/Ollama/NVIDIA configuration. Treat measurements according to the scope notes below; do not present them as model-only measurements unless they are genuinely isolated.
 
+## Measurement reference
+
+See [docs/measurement-guide.md](docs/measurement-guide.md) for the exact metrics, data sources, calculation formulas, attribution limits, and measurements this prototype does not yet provide.
+
 ## What it does
 
 - **Model registry:** lists locally installed Ollama models and displays file size, family, parameter metadata and the quantization level reported by Ollama.
