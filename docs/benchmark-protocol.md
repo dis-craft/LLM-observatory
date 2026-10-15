@@ -21,6 +21,7 @@ Each comparison needs four explicit pieces:
 - **Prompt processing:** longer synthetic log context, short output cap; useful for examining prompt-prefill behaviour. This is a generated test workload, not a real external dataset.
 - **Generation:** short instruction, higher output-token cap; useful for examining decode behaviour. The model may stop early, so use the actual output-token count.
 - **Long input + long answer:** synthetic log context and a higher output cap; combines prompt processing with sustained generation.
+- **Long input + long answer:** synthetic log context and a higher output cap; combines prompt processing with sustained generation.
 - **Long-context retrieval:** synthetic records containing a planted lookup code; useful for controlled retrieval stress tests, not as a factual-knowledge benchmark.
 - **Custom prompts:** the researcher's own fixed workload.
 
