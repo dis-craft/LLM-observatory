@@ -468,6 +468,10 @@ def add_baseline_comparisons(
         "prompt_tokens_per_second_median",
         "peak_sampled_vram_mb",
         "peak_sampled_system_ram_bytes",
+        "peak_sampled_cpu_utilization_pct",
+        "peak_sampled_gpu_utilization_pct",
+        "peak_sampled_gpu_power_w",
+        "peak_sampled_gpu_temperature_c",
         "gpu_energy_j_median_estimate",
     ]
     reference = summaries.get(baseline_model) or {}
@@ -775,6 +779,10 @@ def performance_worker(experiment_id: str, config: dict[str, Any]) -> dict[str, 
                         "sample_count_during_request": len(relevant),
                         "peak_sampled_vram_mb": max((s.get("gpu", {}).get("memory_used_mb") for s in relevant if s.get("gpu") and isinstance(s["gpu"].get("memory_used_mb"), (int, float))), default=None),
                         "peak_sampled_ram_bytes": max((s.get("ram_used_bytes") for s in relevant if isinstance(s.get("ram_used_bytes"), (int, float))), default=None),
+                        "peak_sampled_cpu_utilization_pct": max((s.get("cpu_utilization_pct") for s in relevant if isinstance(s.get("cpu_utilization_pct"), (int, float))), default=None),
+                        "peak_sampled_gpu_utilization_pct": max((s.get("gpu", {}).get("utilization_pct") for s in relevant if s.get("gpu") and isinstance(s["gpu"].get("utilization_pct"), (int, float))), default=None),
+                        "peak_sampled_gpu_power_w": max((s.get("gpu", {}).get("power_w") for s in relevant if s.get("gpu") and isinstance(s["gpu"].get("power_w"), (int, float))), default=None),
+                        "peak_sampled_gpu_temperature_c": max((s.get("gpu", {}).get("temperature_c") for s in relevant if s.get("gpu") and isinstance(s["gpu"].get("temperature_c"), (int, float))), default=None),
                         "gpu_energy_j_estimate": energy["energy_j"],
                         "gpu_energy_coverage_fraction": energy["coverage_fraction"],
                         "gpu_energy_sample_count": energy["sample_count"],
@@ -793,7 +801,7 @@ def performance_worker(experiment_id: str, config: dict[str, Any]) -> dict[str, 
 
     by_model = {}
     for model in config["models"]:
-        subset = [row for row in trials if row["model"] == model and row["status"] == "completed"]
+        subset = [row for row in trials if row["model"] == model]
         by_model[model] = summarize_trials(subset)
     baseline_model = config.get("baseline_model") or config["models"][0]
     add_baseline_comparisons(by_model, baseline_model)
