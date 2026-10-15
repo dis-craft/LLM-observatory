@@ -141,10 +141,12 @@ class PairedPerformanceOrderTests(unittest.TestCase):
             return {"timestamp": "test", "monotonic_s": time.perf_counter(),
                     "cpu_utilization_pct": 10.0, "ram_used_bytes": 1000, "gpu": None}
 
-        with patch("app.stream_chat", side_effect=fake_stream), \\
-             patch("app.collect_telemetry", side_effect=fake_telemetry), \\
-             patch("app.benchmark_environment", return_value={"models": [], "gpu_snapshot": None}), \\
-             patch("app.db_update"):
+        with (
+            patch("app.stream_chat", side_effect=fake_stream),
+            patch("app.collect_telemetry", side_effect=fake_telemetry),
+            patch("app.benchmark_environment", return_value={"models": [], "gpu_snapshot": None}),
+            patch("app.db_update"),
+        ):
             result = performance_worker("test-run", config)
 
         self.assertEqual(calls, [
