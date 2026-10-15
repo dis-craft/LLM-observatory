@@ -12,6 +12,7 @@ from app import (
     native_quality_worker,
     normalize_answer,
     performance_worker,
+    start_performance,
     reference_assertion_passes,
     start_native_evaluation,
     summarize_quality_trials,
@@ -76,11 +77,11 @@ class SampledEnergyTests(unittest.TestCase):
 class PerformanceSummaryTests(unittest.TestCase):
     def test_reports_spread_actual_failures_and_token_statistics(self):
         trials = [
-            {"status": "completed", "client_latency_s": 1.0, "time_to_first_token_s": 0.2,
+            {"status": "completed", "prompt_index": 0, "client_latency_s": 1.0, "time_to_first_token_s": 0.2,
              "generation_tokens_per_second": 10.0, "prompt_tokens_per_second": 40.0,
              "prompt_tokens": 100, "output_tokens": 20, "peak_sampled_vram_mb": 600,
              "peak_sampled_ram_bytes": 2_000, "gpu_energy_j_estimate": 4.0},
-            {"status": "completed", "client_latency_s": 3.0, "time_to_first_token_s": 0.4,
+            {"status": "completed", "prompt_index": 0, "client_latency_s": 3.0, "time_to_first_token_s": 0.4,
              "generation_tokens_per_second": 20.0, "prompt_tokens_per_second": 60.0,
              "prompt_tokens": 120, "output_tokens": 30, "peak_sampled_vram_mb": 700,
              "peak_sampled_ram_bytes": 3_000, "gpu_energy_j_estimate": None},
@@ -93,6 +94,8 @@ class PerformanceSummaryTests(unittest.TestCase):
         self.assertEqual(result["latency_median_s"], 2.0)
         self.assertEqual(result["latency_stddev_s"], 1.0)
         self.assertEqual(result["generation_tokens_per_second_stddev"], 5.0)
+        self.assertEqual(result["latency_within_prompt_stddev_mean_s"], 1.0)
+        self.assertEqual(result["generation_tokens_per_second_within_prompt_stddev_mean"], 5.0)
         self.assertEqual(result["peak_sampled_vram_mb"], 700)
         self.assertEqual(result["peak_sampled_system_ram_bytes"], 3000)
         self.assertEqual(result["gpu_energy_j_median_estimate"], 4.0)
@@ -103,6 +106,18 @@ class PerformanceSummaryTests(unittest.TestCase):
         self.assertIsNone(result["latency_stddev_s"])
         self.assertIsNone(result["generation_tokens_per_second_stddev"])
 
+class WorkloadProfileRequestTests(unittest.TestCase):
+    def test_long_input_long_output_profile_is_accepted_and_persisted(self):
+        request = PerformanceRequest(
+            models=["reference", "quantized"], baseline_model="reference",
+            workload_profile="long", prompts=["same prompt"], repetitions=1,
+            warmups=0, temperature=0.0, context_length=4096, max_tokens=512,
+        )
+        with patch("app.ensure_valid_models"), patch("app.begin_job", return_value="run-id") as begin:
+            response = start_performance(request)
+        self.assertEqual(response, {"experiment_id": "run-id", "status": "queued"})
+        self.assertEqual(begin.call_args.args[1]["workload_profile"], "long")
+        self.assertEqual(begin.call_args.args[1]["baseline_model"], "reference")
 class PairedPerformanceOrderTests(unittest.TestCase):
     def test_repetition_order_alternates_for_each_matched_prompt(self):
         calls = []
