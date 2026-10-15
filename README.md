@@ -12,8 +12,9 @@ See [docs/measurement-guide.md](docs/measurement-guide.md) for the exact metrics
 
 - **Model registry:** lists locally installed Ollama models and displays file size, family, parameter metadata and the quantization level reported by Ollama.
 - **Hardware telemetry:** samples system CPU/RAM, NVIDIA GPU utilization, VRAM, temperature, clocks and instantaneous power where supported; reports Ollama process RSS/CPU and the model allocation returned by Ollama.
-- **Performance lab:** runs serial, repeatable prompt trials against one or more installed model variants. Records client-measured time to first token and end-to-end stream latency, plus Ollama's prompt/generation token counts and durations. Summarizes median/mean latency, p95 latency and token throughput.
-- **Quality evaluation:** invokes [Promptfoo](https://www.promptfoo.dev/docs/providers/ollama/) when Promptfoo or npx is available. The initial UI supports simple contains, equals, and not-contains assertions against a fixed list of prompts.
+- **Performance benchmark:** runs serial, repeatable prompt trials against installed model variants. Records client-measured TTFT and end-to-end latency, Ollama prompt/generation token counts and durations, median/mean/p95 latency, token throughput, sampled peak memory, and a sampled GPU-device energy estimate when power-sample coverage is adequate. Energy is not model-isolated or whole-laptop energy.
+- **Quality benchmark:** built-in local evaluator runs the same reference cases repeatedly across selected variants, scoring contains/equals/not-contains assertions, normalized exact-reference matches, baseline text agreement, repeated-answer consistency, and request failures. It does not claim semantic similarity or a validated hallucination rate.
+- **Optional Promptfoo:** the external Promptfoo integration remains available via the API/tooling workflow for richer provider-based output assertions when Promptfoo or npx is installed.
 - **Standard benchmarks:** optionally invokes the LM Evaluation Harness through Ollama's OpenAI-compatible chat endpoint for selected generation tasks where the installed task and harness support that interface.
 - **External results:** imports CSV/JSON outputs, including llama-bench results. Imported results remain labeled separately because different runtimes and measurement protocols are not automatically comparable.
 - **Persistent history:** saves experiment configuration, progress and results to local SQLite under data/observatory.sqlite3. Per-run files are stored under data/runs/.
@@ -53,15 +54,15 @@ The server binds to loopback (127.0.0.1) by default. Do not bind it to all netwo
 3. Use the same fixed prompts, system prompt, temperature, context length and output-token cap.
 4. Keep trials serial, leave warm-up requests out of the measured trials, and repeat each condition.
 5. Save the run and inspect its result record. Review the interpretation notes before using numbers in a report.
-6. Open **Quality evaluation** and run the same evaluation cases through Promptfoo separately, so quality evaluation does not compete for the GPU during the performance run.
+6. Open **Quality checks** and run the same fixed reference cases separately from performance tests. Set at least 3 repetitions for a first reliability screen; the first selected model is the baseline used for exact-text agreement comparisons.
 
 The built-in pilot prompts are examples, not a validated research dataset. Replace them with documented tasks and a reference-backed scoring protocol before making claims about factual reliability or hallucinations.
 
 ## Optional tools
 
-### Promptfoo quality checks
+### Optional Promptfoo quality checks
 
-Install Node.js, then install Promptfoo (or let the application use npx if it is available):
+The built-in quality benchmark does not require Promptfoo. For the optional Promptfoo workflow/API integration, install Node.js, then install Promptfoo (or let the application use npx if it is available):
 
     npm install -g promptfoo
     promptfoo --version
@@ -103,9 +104,9 @@ Documentation: https://developer.nvidia.com/nsight-systems
 - **GPU utilization, VRAM, power and temperature:** readings from nvidia-smi; they are device-wide and can include Chrome, the desktop compositor and other GPU processes.
 - **Ollama model allocation:** the /api/ps size and size_vram fields are runtime-reported. The CPU-side value is a subtraction-based estimate, not a measured per-layer or weight-only allocation.
 - **Peak sampled memory:** the sampler can miss brief peaks, especially for short requests. The number of samples that fell inside a request is recorded.
-- **Energy:** not currently measured per request. A single power reading in watts is not energy. Energy requires integrating power over a defined interval, ideally with a documented idle baseline; use a suitable external meter for whole-laptop energy claims.
+- **Energy:** performance trials now estimate GPU-device joules by trapezoidally integrating timestamped `nvidia-smi` power samples. An estimate is emitted only when at least two samples fall inside a request and at least 80% of the request window is covered by usable sample intervals. This is approximate device-wide energy, not isolated model energy or whole-laptop energy. Short requests may have no estimate. Use a suitable external meter for whole-laptop energy claims.
 - **Memory bandwidth, GPU kernel time and isolated process GPU power:** not measured directly by this dashboard.
-- **Reliability:** simple assertions are only preliminary output checks. They do not determine a general hallucination rate.
+- **Reliability:** the native quality benchmark reports reference-assertion pass rate, normalized exact text match, normalized exact agreement with the first selected baseline model, repeat consistency and request failure rate. These are transparent screening metrics; they do not score semantic equivalence or determine a general hallucination rate.
 - **Instrumentation overhead:** telemetry sampling and the dashboard consume some resources; its sampling interval and observer overhead should be documented.
 - **Background activity:** minimize unrelated workloads and record their presence. A device-wide GPU increase cannot automatically be attributed exclusively to the LLM.
 
