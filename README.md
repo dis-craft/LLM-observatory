@@ -60,20 +60,16 @@ The built-in pilot prompts are examples, not a validated research dataset. Repla
 
 ## Optional tools
 
-### Optional Promptfoo quality checks
+### Optional Promptfoo integration
 
-The built-in quality benchmark does not require Promptfoo. For the optional Promptfoo workflow/API integration, install Node.js, then install Promptfoo (or let the application use npx if it is available):
+The dashboard's **Quality checks** page uses the built-in evaluator and does not require Node.js or Promptfoo. The separate `POST /api/evaluations/promptfoo` endpoint delegates to Promptfoo and requires either the `promptfoo` CLI or `npx`.
+
+To enable that optional endpoint, install Node.js and Promptfoo:
 
     npm install -g promptfoo
     promptfoo --version
 
-Open **Quality evaluation** to choose installed Ollama model tags and define cases as one per line:
-
-    What is the capital of Japan? || Tokyo
-    How many sides does a triangle have? || three
-    What is 7 multiplied by 8? || 56
-
-Choose contains, equals, or not-contains. These assertions are useful for basic regression checks, but they are **not a validated hallucination metric**. Phrase matching can reject a correct paraphrase or pass an answer that contains the expected words plus incorrect claims. Use a broader fixed evaluation set and validate factuality scoring against trusted references or human review.
+Each case contains a `question`, an `expected` phrase, and an assertion type: `contains`, `equals`, or `not-contains`. The endpoint stores the evaluator's raw report and logs with the experiment. Phrase matching can reject a correct paraphrase or pass an answer that includes the expected words alongside incorrect claims. It is **not a validated hallucination metric**; use a broader fixed evaluation set and validate factuality scoring against trusted references or human review.
 
 ### LM Evaluation Harness
 
