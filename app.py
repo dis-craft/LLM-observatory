@@ -4,6 +4,7 @@ import csv
 import json
 import math
 import os
+import re
 import shutil
 import sqlite3
 import statistics
@@ -229,6 +230,7 @@ def collect_telemetry() -> dict[str, Any]:
 
     return {
         "timestamp": now_iso(),
+        "monotonic_s": time.perf_counter(),
         "cpu_utilization_pct": cpu_pct,
         "ram_used_bytes": vm.used,
         "ram_total_bytes": vm.total,
@@ -279,6 +281,127 @@ def tool_status() -> dict[str, Any]:
     }
 
 
+def normalize_answer(value: str) -> str:
+    """Normalize casing, punctuation and whitespace for exact-text comparisons."""
+    return " ".join(re.sub(r"[^\\w\\s]", "", (value or "").casefold()).split())
+
+
+def reference_assertion_passes(output: str, expected: str, assertion: str) -> bool:
+    actual_norm = normalize_answer(output)
+    expected_norm = normalize_answer(expected)
+    if assertion == "contains":
+        return expected_norm in actual_norm
+    if assertion == "equals":
+        return actual_norm == expected_norm
+    if assertion == "not-contains":
+        return expected_norm not in actual_norm
+    raise ValueError("Unsupported assertion: " + assertion)
+
+
+def estimate_gpu_energy_joules(
+    points: list[dict[str, Any]],
+    start_monotonic: float,
+    end_monotonic: float,
+    max_gap_s: float,
+) -> dict[str, Any]:
+    """Estimate device-wide GPU energy by integrating sampled power over a request window.
+
+    This is an estimate from nvidia-smi samples, not model-isolated energy. It is
+    returned only when at least two samples fall inside the request and at least
+    80% of the interval can be interpolated across sufficiently close samples.
+    """
+    duration = end_monotonic - start_monotonic
+    if duration <= 0:
+        return {"energy_j": None, "coverage_fraction": 0.0, "sample_count": 0}
+
+    readings: dict[float, float] = {}
+    for point in points:
+        timestamp = point.get("monotonic_s")
+        gpu = point.get("gpu") or {}
+        power = gpu.get("power_w")
+        if isinstance(timestamp, (int, float)) and isinstance(power, (int, float)) and math.isfinite(power):
+            readings[float(timestamp)] = float(power)
+    ordered = sorted(readings.items())
+    inside_count = sum(start_monotonic <= timestamp <= end_monotonic for timestamp, _ in ordered)
+    energy = 0.0
+    covered = 0.0
+
+    for (t0, p0), (t1, p1) in zip(ordered, ordered[1:]):
+        gap = t1 - t0
+        left = max(start_monotonic, t0)
+        right = min(end_monotonic, t1)
+        if right <= left or gap <= 0 or gap > max_gap_s:
+            continue
+        power_left = p0 + (p1 - p0) * ((left - t0) / gap)
+        power_right = p0 + (p1 - p0) * ((right - t0) / gap)
+        energy += (power_left + power_right) * 0.5 * (right - left)
+        covered += right - left
+
+    coverage = min(1.0, covered / duration)
+    valid = inside_count >= 2 and coverage >= 0.8
+    return {
+        "energy_j": energy if valid else None,
+        "coverage_fraction": coverage,
+        "sample_count": inside_count,
+        "method": "trapezoidal integration of device-wide nvidia-smi power samples",
+        "scope": "GPU device-wide estimate; not model-isolated or whole-laptop energy",
+    }
+
+
+def summarize_quality_trials(
+    trials: list[dict[str, Any]],
+    models: list[str],
+    case_count: int,
+    repetitions: int,
+) -> dict[str, Any]:
+    baseline = models[0] if models else None
+    baseline_outputs = {
+        (row["case_index"], row["repetition"]): normalize_answer(row.get("output", ""))
+        for row in trials
+        if row.get("model") == baseline and row.get("status") == "completed"
+    }
+    summaries: dict[str, Any] = {}
+    for model in models:
+        subset = [row for row in trials if row.get("model") == model]
+        completed = [row for row in subset if row.get("status") == "completed"]
+        baseline_pairs = [
+            row for row in completed
+            if (row.get("case_index"), row.get("repetition")) in baseline_outputs
+        ]
+        consistency_values = []
+        if repetitions > 1:
+            for case_index in range(case_count):
+                answers = [
+                    normalize_answer(row.get("output", ""))
+                    for row in completed if row.get("case_index") == case_index
+                ]
+                if len(answers) >= 2:
+                    counts: dict[str, int] = {}
+                    for answer in answers:
+                        counts[answer] = counts.get(answer, 0) + 1
+                    consistency_values.append(max(counts.values()) / len(answers))
+        summaries[model] = {
+            "total_trials": len(subset),
+            "completed_trials": len(completed),
+            "failed_trials": len(subset) - len(completed),
+            "failure_rate": (len(subset) - len(completed)) / len(subset) if subset else None,
+            "assertion_pass_rate": sum(row.get("passed") is True for row in subset) / len(subset) if subset else None,
+            "reference_exact_match_rate": (
+                sum(row.get("reference_exact_match") is True for row in completed) / len(completed)
+                if completed else None
+            ),
+            "baseline_exact_agreement_rate": (
+                sum(normalize_answer(row.get("output", "")) == baseline_outputs[(row["case_index"], row["repetition"])]
+                    for row in baseline_pairs) / len(baseline_pairs)
+                if baseline_pairs else None
+            ),
+            "repeat_consistency_rate": statistics.mean(consistency_values) if consistency_values else None,
+            "repeat_consistency_cases": len(consistency_values),
+            "baseline_model": baseline,
+        }
+    return summaries
+
+
 def quantile(values: list[float], q: float) -> float | None:
     valid = sorted(v for v in values if math.isfinite(v))
     if not valid:
@@ -300,6 +423,7 @@ def summarize_trials(trials: list[dict[str, Any]]) -> dict[str, Any]:
     generation_speed = vals("generation_tokens_per_second")
     prompt_speed = vals("prompt_tokens_per_second")
     ttft = vals("time_to_first_token_s")
+    gpu_energy = vals("gpu_energy_j_estimate")
     return {
         "completed_trials": len(trials),
         "latency_median_s": statistics.median(latencies) if latencies else None,
@@ -309,6 +433,9 @@ def summarize_trials(trials: list[dict[str, Any]]) -> dict[str, Any]:
         "generation_tokens_per_second_median": statistics.median(generation_speed) if generation_speed else None,
         "prompt_tokens_per_second_median": statistics.median(prompt_speed) if prompt_speed else None,
         "generation_tokens_per_second_mean": statistics.mean(generation_speed) if generation_speed else None,
+        "gpu_energy_j_median_estimate": statistics.median(gpu_energy) if gpu_energy else None,
+        "gpu_energy_j_mean_estimate": statistics.mean(gpu_energy) if gpu_energy else None,
+        "gpu_energy_estimated_trials": len(gpu_energy),
     }
 
 
@@ -393,6 +520,16 @@ class LMEvalRequest(BaseModel):
     limit: int = Field(default=25, ge=1, le=500)
 
 
+class NativeEvaluationRequest(BaseModel):
+    models: list[str] = Field(min_length=1, max_length=8)
+    cases: list[PromptfooCase] = Field(min_length=1, max_length=100)
+    repetitions: int = Field(default=3, ge=1, le=10)
+    temperature: float = Field(default=0.0, ge=0, le=2)
+    context_length: int = Field(default=2048, ge=512, le=16384)
+    max_tokens: int = Field(default=128, ge=16, le=2048)
+    system_prompt: str = "You are a helpful assistant. Answer the prompt clearly and accurately."
+
+
 class ImportRequest(BaseModel):
     filename: str
     content: str = Field(max_length=5_000_000)
@@ -474,10 +611,21 @@ def performance_worker(experiment_id: str, config: dict[str, Any]) -> dict[str, 
                         outcome = "failed"
                         error = str(exc)
                         errors.append({"model": model, "prompt_index": prompt_idx, "repetition": repetition + 1, "error": error})
-                    elapsed = time.perf_counter() - started_clock
+                    request_end_clock = time.perf_counter()
+                    elapsed = request_end_clock - started_clock
                     after = collect_telemetry()
                     with sample_lock:
-                        relevant = [item for item in telemetry_samples if started_at <= item["timestamp"] <= now_iso()]
+                        relevant = [
+                            item for item in telemetry_samples
+                            if isinstance(item.get("monotonic_s"), (int, float))
+                            and started_clock <= item["monotonic_s"] <= request_end_clock
+                        ]
+                    energy = estimate_gpu_energy_joules(
+                        [before, *relevant, after],
+                        started_clock,
+                        request_end_clock,
+                        max(1.0, config["sample_interval_s"] * 2.0),
+                    )
                     trial = {
                         "model": model,
                         "prompt_index": prompt_idx,
@@ -491,6 +639,10 @@ def performance_worker(experiment_id: str, config: dict[str, Any]) -> dict[str, 
                         "sample_count_during_request": len(relevant),
                         "peak_sampled_vram_mb": max((s.get("gpu", {}).get("memory_used_mb") for s in relevant if s.get("gpu") and isinstance(s["gpu"].get("memory_used_mb"), (int, float))), default=None),
                         "peak_sampled_ram_bytes": max((s.get("ram_used_bytes") for s in relevant if isinstance(s.get("ram_used_bytes"), (int, float))), default=None),
+                        "gpu_energy_j_estimate": energy["energy_j"],
+                        "gpu_energy_coverage_fraction": energy["coverage_fraction"],
+                        "gpu_energy_sample_count": energy["sample_count"],
+                        "gpu_energy_scope": energy.get("scope"),
                         **metrics,
                     }
                     if error:
@@ -517,9 +669,64 @@ def performance_worker(experiment_id: str, config: dict[str, Any]) -> dict[str, 
             "Latency and token timing come from the Ollama response stream and response statistics.",
             "System and GPU telemetry are shared-device readings; they are not isolated to the model.",
             "The observer samples resources during the experiment and can introduce small measurement overhead.",
-            "No per-request energy is claimed. Instantaneous GPU power is not integrated into joules.",
+            "Estimated GPU-device energy is reported only when sampled power covers at least 80% of the request window and at least two samples fall inside it; it is not model-isolated or whole-laptop energy.",
             "Short requests may finish between telemetry samples; peak sampled memory can therefore miss brief spikes.",
             "Quality is not inferred from performance measurements. Run a quality evaluation separately.",
+        ],
+    }
+
+
+def native_quality_worker(experiment_id: str, config: dict[str, Any]) -> dict[str, Any]:
+    trials: list[dict[str, Any]] = []
+    total = len(config["models"]) * len(config["cases"]) * config["repetitions"]
+    for model in config["models"]:
+        for case_index, case in enumerate(config["cases"]):
+            for repetition in range(1, config["repetitions"] + 1):
+                row: dict[str, Any] = {
+                    "model": model,
+                    "case_index": case_index,
+                    "repetition": repetition,
+                    "question": case["question"],
+                    "expected": case["expected"],
+                    "assertion": case["assertion"],
+                    "status": "failed",
+                    "output": "",
+                    "passed": False,
+                    "reference_exact_match": False,
+                }
+                try:
+                    metrics = stream_chat(
+                        model, case["question"], config["system_prompt"], config["temperature"],
+                        config["context_length"], config["max_tokens"],
+                    )
+                    output = metrics["output"]
+                    row.update({
+                        "status": "completed",
+                        "output": output,
+                        "passed": reference_assertion_passes(output, case["expected"], case["assertion"]),
+                        "reference_exact_match": normalize_answer(output) == normalize_answer(case["expected"]),
+                        "output_tokens": metrics.get("output_tokens"),
+                        "time_to_first_token_s": metrics.get("time_to_first_token_s"),
+                        "client_latency_s": metrics.get("client_latency_s"),
+                        "generation_tokens_per_second": metrics.get("generation_tokens_per_second"),
+                    })
+                except Exception as exc:
+                    row["error"] = str(exc)
+                trials.append(row)
+                db_update(experiment_id, progress=min(99, len(trials) / max(total, 1) * 100))
+    return {
+        "config": config,
+        "baseline_model": config["models"][0],
+        "summary_by_model": summarize_quality_trials(
+            trials, config["models"], len(config["cases"]), config["repetitions"]
+        ),
+        "trials": trials,
+        "notes": [
+            "Assertion pass rate measures only the chosen rule against each reference; it is not a general factuality or hallucination score.",
+            "Exact reference match is normalized text equality (case, punctuation and whitespace normalized), not semantic equivalence.",
+            "Baseline agreement is normalized exact-text agreement with the first selected model, not proof that either answer is correct.",
+            "Repeat consistency is the share of a case's repeated completed answers matching its modal normalized answer. Use repetitions greater than one.",
+            "Run quality evaluation separately from performance measurement to avoid resource contention.",
         ],
     }
 
@@ -694,6 +901,18 @@ def start_performance(body: PerformanceRequest) -> dict[str, Any]:
     config = body.model_dump()
     config["prompts"] = prompts
     experiment_id = begin_job("performance", config, performance_worker)
+    return {"experiment_id": experiment_id, "status": "queued"}
+
+
+@app.post("/api/evaluations/native")
+def start_native_evaluation(body: NativeEvaluationRequest) -> dict[str, Any]:
+    ensure_valid_models(body.models)
+    if any(case.assertion not in {"contains", "equals", "not-contains"} for case in body.cases):
+        raise HTTPException(status_code=400, detail="Supported reference checks: contains, equals, not-contains.")
+    if len(body.models) * len(body.cases) * body.repetitions > 500:
+        raise HTTPException(status_code=400, detail="This quality run would exceed 500 requests. Reduce models, cases or repetitions.")
+    config = body.model_dump()
+    experiment_id = begin_job("native_quality", config, native_quality_worker)
     return {"experiment_id": experiment_id, "status": "queued"}
 
 
