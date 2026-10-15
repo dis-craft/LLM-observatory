@@ -472,6 +472,9 @@ def add_baseline_comparisons(
         "peak_sampled_gpu_utilization_pct",
         "peak_sampled_gpu_power_w",
         "peak_sampled_gpu_temperature_c",
+        "peak_sampled_ollama_rss_bytes",
+        "peak_sampled_ollama_allocation_bytes",
+        "peak_sampled_ollama_vram_allocation_bytes",
         "gpu_energy_j_median_estimate",
     ]
     reference = summaries.get(baseline_model) or {}
