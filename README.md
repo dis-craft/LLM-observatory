@@ -54,7 +54,7 @@ The server binds to loopback (127.0.0.1) by default. Do not bind it to all netwo
 3. Use the same fixed prompts, system prompt, temperature, context length and output-token cap.
 4. Keep trials serial, leave warm-up requests out of the measured trials, and repeat each condition.
 5. Save the run and inspect its result record. Review the interpretation notes before using numbers in a report.
-6. Open **Quality checks** and run the same fixed reference cases separately from performance tests. Set at least 3 repetitions for a first reliability screen; the first selected model is the baseline used for exact-text agreement comparisons.
+6. Open **Quality checks** and run the same fixed reference cases separately from performance tests. Set at least 3 repetitions for a first reliability screen; choose the reference baseline explicitly; baseline agreement uses normalized text.
 
 The built-in pilot prompts are examples, not a validated research dataset. Replace them with documented tasks and a reference-backed scoring protocol before making claims about factual reliability or hallucinations.
 
