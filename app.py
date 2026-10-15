@@ -662,7 +662,7 @@ class NativeEvaluationRequest(BaseModel):
     models: list[str] = Field(min_length=1, max_length=8)
     baseline_model: str
     cases: list[PromptfooCase] = Field(min_length=1, max_length=100)
-    repetitions: int = Field(default=3, ge=1, le=10)
+    repetitions: int = Field(default=3, ge=1, le=20)
     temperature: float = Field(default=0.0, ge=0, le=2)
     context_length: int = Field(default=2048, ge=512, le=16384)
     max_tokens: int = Field(default=128, ge=16, le=2048)
