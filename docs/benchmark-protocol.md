@@ -13,17 +13,17 @@ Each comparison needs four explicit pieces:
 1. **Reference:** select the baseline model in the UI. Quantized model results show percentage changes against this baseline.
 2. **Workload:** use the same prompts and workload profile for every selected model.
 3. **Controls:** keep hardware, runtime, system prompt, context limit, output cap, temperature and warm-up/repetition settings fixed. Record model tags and quantization metadata.
-4. **Repetition:** run several measured repetitions. Report distributions, not a single best run. The current native runner uses the selected model order and runs requests serially; repeat a study with reversed selection order to check order/thermal effects if the difference matters.
+4. **Repetition:** run several measured repetitions. Report distributions, not a single best run. The runner warms each selected model, then pairs models on each prompt and repetition, alternating model order on successive repetitions. This reduces simple order bias but cannot remove thermal drift or background interference; repeat important comparisons with a different model-selection order.
 
 ## Included workload profiles
 
 - **Balanced edge workload:** three short, mixed questions; a quick general-purpose snapshot.
-- **Prompt processing:** longer supplied context, short output cap; useful for examining prompt-prefill behaviour.
+- **Prompt processing:** longer synthetic log context, short output cap; useful for examining prompt-prefill behaviour. This is a generated test workload, not a real external dataset.
 - **Generation:** short instruction, higher output-token cap; useful for examining decode behaviour. The model may stop early, so use the actual output-token count.
 - **Long-context retrieval:** a longer context with a known lookup answer; useful for prompt-length and retrieval experiments. Score correctness separately in Quality checks.
 - **Custom prompts:** the researcher's own fixed workload.
 
-The text-based presets are reproducible prompts, **not exact token-length guarantees**. Token counts vary by tokenizer and include the actual request formatting. Review recorded prompt/output token counts before interpreting one run as a particular token-length class.
+The text-based presets are reproducible prompts, **not exact token-length guarantees**. Prefill, retrieval and long-synthesis presets use synthetic log records; they are not real or externally sourced operational data. Token counts vary by tokenizer and include the actual request formatting. Review recorded prompt/output token counts before interpreting one run as a particular token-length class.
 
 ## Performance metrics and calculations
 
@@ -35,7 +35,7 @@ The text-based presets are reproducible prompts, **not exact token-length guaran
 - **Memory:** model file size is read from Ollama; current and peak sampled RAM/VRAM are whole-system/device samples. Ollama runtime allocation is also recorded separately when available.
 - **GPU energy estimate:** trapezoidal integration of device-wide `nvidia-smi` power readings. An estimate is displayed only if at least two readings are inside the request window and usable intervals cover at least 80% of the request duration. It is not isolated model energy or whole-laptop energy; concurrent GPU work and sampling gaps can affect it.
 - **Baseline change:** `(model metric - baseline metric) / abs(baseline metric) × 100%`. Negative latency change means less latency; positive tokens/second change means higher throughput. The sign is the raw numerical change, so interpret it with the direction of each metric.
-- **Variability:** report median, mean and p95 client latency, median TTFT, and median/mean throughput where available. Confidence intervals and statistical significance are not calculated automatically.
+- **Variability:** report median, mean and p95 client latency, median TTFT, standard deviation across all successful trials, and average within-prompt standard deviation where at least two repetitions exist. Overall standard deviation mixes prompt difficulty with run-to-run variation; within-prompt standard deviation better isolates observed repetition spread. Confidence intervals and statistical significance are not calculated automatically.
 
 ## Quality and reliability
 
