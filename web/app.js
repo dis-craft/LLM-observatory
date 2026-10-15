@@ -115,7 +115,7 @@
     prefill: {
       prompts: ["Read the following operational report. Summarize its overall patterns in two short sentences. Do not invent facts. " + createLogContext("prefill")],
       context: "4096", output: "32",
-      description: "Long input with a short output cap. Focus: prompt-processing behaviour. Actual token length depends on the model tokenizer."
+      description: "Long input made from synthetic log records with a short output cap. Focus: prompt-processing behaviour; actual token length depends on the tokenizer."
     },
     decode: {
       prompts: ["Write a detailed but factual guide to running language models on edge devices. Use eight clearly named sections covering quantization, memory, latency, throughput, reliability, power, thermal limits, and deployment trade-offs. Include examples and a final checklist. Do not claim measurements you have not performed."],
@@ -125,12 +125,12 @@
     retrieval: {
       prompts: [createLogContext("retrieval")],
       context: "4096", output: "32",
-      description: "Long input with a known lookup answer. Use Quality checks to score correctness separately."
+      description: "Synthetic long-context lookup with a planted code. Use the separate Quality checks page to score correctness."
     },
     long: {
       prompts: ["Using the operational records below, write a structured report with sections for observed patterns, anomalies, limits of the evidence, and recommendations. Reference the records rather than making up measurements. " + createLogContext("long")],
       context: "4096", output: "512",
-      description: "Long input plus a longer answer. This combines prompt processing and sustained generation; review the actual token counts."
+      description: "Synthetic long input plus a longer answer. This combines prompt processing and generation; review actual token counts."
     }
   };
 
@@ -274,6 +274,9 @@
     $("#start-performance").disabled = locked;
     $("#start-quality").disabled = locked;
     $("#refresh-all").disabled = locked;
+    document.querySelectorAll("#configuration input, #configuration select, #configuration textarea, #quality-section input, #quality-section select, #quality-section textarea").forEach((control) => {
+      control.disabled = locked;
+    });
     if (locked) $("#job-card").classList.remove("hidden");
   }
 
@@ -328,10 +331,7 @@
     try {
       const response = await api(endpoint, { method: "POST", body: JSON.stringify(payload) });
       setJob(kind, response.experiment_id, message);
-      const result = await waitForJob(response.experiment_id, kind);
-      if (result.status !== "completed") {
-        throw new Error(result.error || (result.result && result.result.error) || "Benchmark failed.");
-      }
+      await waitForJob(response.experiment_id, kind);
     } catch (error) {
       $("#job-message").textContent = error.message;
       $("#job-status").textContent = "ERROR";
@@ -459,7 +459,7 @@
         '<td><strong>' + number(m.peak_sampled_gpu_utilization_pct, 0) + '%</strong><small>peak sampled</small><small>' + number(m.peak_sampled_gpu_power_w, 1) + ' W · ' + number(m.peak_sampled_gpu_temperature_c, 0) + ' °C</small><small>SM clock ' + number(m.peak_sampled_gpu_sm_clock_mhz, 0) + ' MHz</small></td>' +
         '<td><strong>' + bytes(m.peak_sampled_ollama_rss_bytes) + ' RSS</strong><small>Process CPU peak ' + number(m.peak_sampled_ollama_cpu_pct, 0) + '%</small><small>Runtime allocation ' + bytes(m.peak_sampled_ollama_allocation_bytes) + ' · ' + relativeChange(m, "peak_sampled_ollama_allocation_bytes") + '</small><small>Runtime VRAM alloc ' + bytes(m.peak_sampled_ollama_vram_allocation_bytes) + ' · ' + relativeChange(m, "peak_sampled_ollama_vram_allocation_bytes") + '</small><small>RSS change ' + relativeChange(m, "peak_sampled_ollama_rss_bytes") + '</small></td>' +
         '<td><strong>' + (m.gpu_energy_j_median_estimate == null ? "Unavailable" : number(m.gpu_energy_j_median_estimate, 2) + " J") + '</strong><small>' + (m.gpu_energy_estimated_trials == null ? "0" : m.gpu_energy_estimated_trials) + "/" + (m.gpu_energy_total_completed_trials == null ? "0" : m.gpu_energy_total_completed_trials) + " trials with estimate</small><small>' + relativeChange(m, "gpu_energy_j_median_estimate") + ' vs baseline</small></td>' +
-        '<td><strong>' + number(m.completed_trials, 0) + '/' + number(m.attempted_trials, 0) + '</strong><small>' + number(m.failed_trials, 0) + ' failed</small><small>Load median ' + number(m.model_load_duration_median_s, 3) + ' s · ' + relativeChange(m, "model_load_duration_median_s") + '</small></td>' +
+        '<td><strong>' + number(m.completed_trials, 0) + '/' + number(m.attempted_trials, 0) + '</strong><small>' + number(m.failed_trials, 0) + ' failed</small><small>Ollama load-stat median ' + number(m.model_load_duration_median_s, 3) + ' s · ' + relativeChange(m, "model_load_duration_median_s") + '</small><small>Not a forced cold-load test</small></td>' +
         '</tr>';
     }).join("");
 
@@ -595,9 +595,31 @@
     toast("Connection, models and saved runs refreshed.");
   });
 
+  async function restoreLatestResults() {
+    const latestPerformance = state.experiments.find((item) => item.kind === "performance" && item.status === "completed");
+    const latestQuality = state.experiments.find((item) => item.kind === "native_quality" && item.status === "completed");
+    for (const pair of [[latestPerformance, "performance"], [latestQuality, "quality"]]) {
+      const item = pair[0], kind = pair[1];
+      if (!item) continue;
+      try {
+        const response = await api("/api/experiments/" + encodeURIComponent(item.id));
+        if (kind === "performance") {
+          state.latestPerformance = response.experiment;
+          renderPerformance(response.experiment);
+        } else {
+          state.latestQuality = response.experiment;
+          renderQuality(response.experiment);
+        }
+      } catch (error) {
+        toast("Saved result could not be restored: " + error.message, true);
+      }
+    }
+  }
+
   async function init() {
     applyProfile("balanced");
     await Promise.all([refreshHealth(), refreshModels(), refreshTelemetry(), refreshHistory()]);
+    await restoreLatestResults();
   }
   init();
 })();
