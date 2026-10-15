@@ -426,6 +426,13 @@ def summarize_trials(trials: list[dict[str, Any]]) -> dict[str, Any]:
     generation_speed = vals("generation_tokens_per_second")
     prompt_speed = vals("prompt_tokens_per_second")
     ttft = vals("time_to_first_token_s")
+    prompt_counts = vals("prompt_tokens")
+    output_counts = vals("output_tokens")
+    prompt_durations = vals("prompt_eval_duration_s")
+    generation_durations = vals("generation_duration_s")
+    load_durations = vals("model_load_duration_s")
+    sampled_vram = vals("peak_sampled_vram_mb")
+    sampled_ram = vals("peak_sampled_ram_bytes")
     gpu_energy = vals("gpu_energy_j_estimate")
     return {
         "completed_trials": len(trials),
@@ -436,9 +443,17 @@ def summarize_trials(trials: list[dict[str, Any]]) -> dict[str, Any]:
         "generation_tokens_per_second_median": statistics.median(generation_speed) if generation_speed else None,
         "prompt_tokens_per_second_median": statistics.median(prompt_speed) if prompt_speed else None,
         "generation_tokens_per_second_mean": statistics.mean(generation_speed) if generation_speed else None,
+        "prompt_tokens_median": statistics.median(prompt_counts) if prompt_counts else None,
+        "output_tokens_median": statistics.median(output_counts) if output_counts else None,
+        "prompt_processing_duration_median_s": statistics.median(prompt_durations) if prompt_durations else None,
+        "generation_duration_median_s": statistics.median(generation_durations) if generation_durations else None,
+        "model_load_duration_median_s": statistics.median(load_durations) if load_durations else None,
+        "peak_sampled_vram_mb": max(sampled_vram) if sampled_vram else None,
+        "peak_sampled_system_ram_bytes": max(sampled_ram) if sampled_ram else None,
         "gpu_energy_j_median_estimate": statistics.median(gpu_energy) if gpu_energy else None,
         "gpu_energy_j_mean_estimate": statistics.mean(gpu_energy) if gpu_energy else None,
         "gpu_energy_estimated_trials": len(gpu_energy),
+        "gpu_energy_total_completed_trials": len(trials),
     }
 
 
