@@ -579,6 +579,7 @@ def stream_chat(model: str, prompt: str, system_prompt: str, temperature: float,
 class PerformanceRequest(BaseModel):
     models: list[str] = Field(min_length=1, max_length=8)
     baseline_model: str | None = None
+    workload_profile: str = "custom"
     prompts: list[str] = Field(min_length=1, max_length=30)
     repetitions: int = Field(default=5, ge=1, le=50)
     warmups: int = Field(default=1, ge=0, le=3)
@@ -994,6 +995,8 @@ def start_performance(body: PerformanceRequest) -> dict[str, Any]:
     ensure_valid_models(body.models)
     if body.baseline_model is not None and body.baseline_model not in body.models:
         raise HTTPException(status_code=400, detail="The performance baseline must also be selected for the benchmark.")
+    if body.workload_profile not in {"balanced", "prefill", "decode", "retrieval", "custom"}:
+        raise HTTPException(status_code=400, detail="Choose a supported workload profile or custom prompts.")
     prompts = [prompt.strip() for prompt in body.prompts if prompt.strip()]
     if not prompts:
         raise HTTPException(status_code=400, detail="Add at least one non-empty prompt.")
