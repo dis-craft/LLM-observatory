@@ -67,8 +67,8 @@ class StaticContractTests(unittest.TestCase):
 
         html = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
         javascript = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
-        html_ids = set(re.findall(r'\\bid="([^"]+)"', html))
-        selector_ids = set(re.findall(r"\\$\\(\\"#([A-Za-z0-9_-]+)\\"\\)", javascript))
+        html_ids = set(re.findall(r'\bid="([^"]+)"', html))
+        selector_ids = set(re.findall(r'\$\("#([A-Za-z0-9_-]+)"\)', javascript))
         self.assertFalse(selector_ids - html_ids, "JS selectors missing in HTML: " + ", ".join(sorted(selector_ids - html_ids)))
     def test_benchmark_protocol_documents_workload_basis(self):
         protocol = (ROOT / "docs" / "benchmark-protocol.md").read_text(encoding="utf-8")
