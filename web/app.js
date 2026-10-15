@@ -165,6 +165,15 @@
       select.replaceChildren(new Option("No models available", ""));
       return;
     }
+
+    if (!state.models.some((model) => model.name === state.baseline)) {
+      state.baseline = state.models[0].name;
+    }
+    // A baseline is part of the experiment by definition; keep its checkbox
+    // selected so the visible selection matches the actual API payload.
+    state.selected.add(state.baseline);
+    if (!state.selected.size) state.selected.add(state.baseline);
+
     state.models.forEach((model) => {
       const label = document.createElement("label");
       label.className = "model-option";
@@ -181,30 +190,26 @@
       copy.append(strong, small);
       const marker = document.createElement("span");
       marker.className = "model-check";
-      marker.textContent = "Select";
+      marker.textContent = check.checked ? "Selected" : "Select";
       label.append(check, copy, marker);
+      if (check.checked) label.classList.add("chosen");
       check.addEventListener("change", () => {
+        if (model.name === state.baseline && !check.checked) {
+          check.checked = true;
+          toast("The reference baseline must remain selected.", true);
+          return;
+        }
         if (check.checked) state.selected.add(model.name);
         else state.selected.delete(model.name);
         marker.textContent = check.checked ? "Selected" : "Select";
         label.classList.toggle("chosen", check.checked);
       });
-      if (check.checked) { label.classList.add("chosen"); marker.textContent = "Selected"; }
       host.appendChild(label);
     });
 
-    const previous = state.baseline;
     select.replaceChildren();
     state.models.forEach((model) => select.add(new Option(model.name, model.name)));
-    state.baseline = state.models.some((model) => model.name === previous) ? previous : state.models[0].name;
     select.value = state.baseline;
-    if (!state.selected.size) state.selected.add(state.baseline);
-    if (!state.selected.has(state.baseline)) state.selected.add(state.baseline);
-    // Re-render after baseline is made part of the selected model set.
-    if (!$('input[type="checkbox"]:checked', host)) {
-      const firstCheck = $('input[type="checkbox"]', host);
-      if (firstCheck) { firstCheck.checked = true; firstCheck.closest("label").classList.add("chosen"); firstCheck.closest("label").querySelector(".model-check").textContent = "Selected"; }
-    }
   }
 
   $("#baseline-model").addEventListener("change", () => {
