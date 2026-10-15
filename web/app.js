@@ -156,6 +156,7 @@
       renderModelOptions("performance-models", ["q2", "q4"]);
       renderModelOptions("quality-models", ["q2", "q4"]);
       updateModelSelect("lm-eval-model");
+    updateModelSelect("quality-baseline");
       $("#runtime-model-count").textContent = state.models.length ? String(state.models.length) + " installed" : "None detected";
     } catch (error) {
       state.models = [];
@@ -654,6 +655,8 @@
     const button = $("#start-quality");
     const models = getSelectedModels("quality-models");
     if (!models.length) { showToast("Select at least one model variant.", "error"); return; }
+    const baselineModel = $("#quality-baseline").value;
+    if (!models.includes(baselineModel)) { showToast("Check the reference baseline in the selected variants list.", "error"); return; }
     let cases;
     try { cases = parseQualityCases(); } catch (error) { showToast(error.message, "error"); return; }
     setSubmitState(button, true, "✓ Run quality benchmark");
@@ -666,7 +669,7 @@
       const response = await api("/api/evaluations/native", {
         method: "POST",
         body: JSON.stringify({
-          models: models, cases: cases, repetitions: repetitions,
+          models: models, baseline_model: baselineModel, cases: cases, repetitions: repetitions,
           temperature: Number($("#quality-temperature").value),
           context_length: Number($("#quality-context").value), max_tokens: Number($("#quality-output").value)
         })
