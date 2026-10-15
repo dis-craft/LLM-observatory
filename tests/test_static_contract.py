@@ -40,7 +40,7 @@ class StaticContractTests(unittest.TestCase):
 
         routes = {getattr(route, "path", "") for route in server.app.routes}
         self.assertTrue({"/", "/api/health", "/api/models", "/api/telemetry",
-                         "/api/experiments/performance", "/api/evaluations/promptfoo",
+                         "/api/experiments/performance", "/api/evaluations/native", "/api/evaluations/promptfoo",
                          "/api/experiments", "/api/results/import"}.issubset(routes))
 
     def test_experiment_storage_is_local_and_ignored(self):
