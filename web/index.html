@@ -17,21 +17,23 @@
         <span class="brand-copy"><strong>LLM Observatory</strong><small>LOCAL RESEARCH LAB</small></span>
       </a>
 
-      <div class="nav-label">WORKSPACE</div>
+      <div class="nav-label">BENCHMARK</div>
       <nav class="primary-nav" aria-label="Primary navigation">
         <button class="nav-item active" data-page="overview"><span class="nav-icon">⌂</span><span>Overview</span></button>
-        <button class="nav-item" data-page="models"><span class="nav-icon">◈</span><span>Model registry</span></button>
-        <button class="nav-item" data-page="performance"><span class="nav-icon">◷</span><span>Performance lab</span><span class="nav-tag">01</span></button>
-        <button class="nav-item" data-page="quality"><span class="nav-icon">✓</span><span>Quality evaluation</span></button>
-        <button class="nav-item" data-page="standard"><span class="nav-icon">▤</span><span>Standard benchmarks</span></button>
-        <button class="nav-item" data-page="results"><span class="nav-icon">↗</span><span>Results & reports</span></button>
+        <button class="nav-item" data-page="performance"><span class="nav-icon">◷</span><span>Run benchmark</span></button>
+        <button class="nav-item" data-page="quality"><span class="nav-icon">✓</span><span>Quality checks</span></button>
+        <button class="nav-item" data-page="results"><span class="nav-icon">↗</span><span>Results</span></button>
       </nav>
 
-      <div class="nav-label system-label">SYSTEM</div>
-      <nav class="primary-nav" aria-label="System navigation">
-        <button class="nav-item" data-page="hardware"><span class="nav-icon">▦</span><span>Hardware telemetry</span></button>
-        <button class="nav-item" data-page="integrations"><span class="nav-icon">⌘</span><span>Integrations</span></button>
-      </nav>
+      <details class="advanced-nav">
+        <summary>Advanced tools</summary>
+        <nav class="primary-nav" aria-label="Advanced tools">
+          <button class="nav-item" data-page="models"><span class="nav-icon">◈</span><span>Model registry</span></button>
+          <button class="nav-item" data-page="standard"><span class="nav-icon">▤</span><span>Standard benchmarks</span></button>
+          <button class="nav-item" data-page="hardware"><span class="nav-icon">▦</span><span>Hardware telemetry</span></button>
+          <button class="nav-item" data-page="integrations"><span class="nav-icon">⌘</span><span>Integrations</span></button>
+        </nav>
+      </details>
 
       <div class="sidebar-bottom">
         <div class="connection-card">
@@ -54,8 +56,8 @@
 
       <section class="page active" id="page-overview" data-title="Overview">
         <div class="page-heading heading-with-actions">
-          <div><div class="eyebrow"><span class="eyebrow-line"></span> QUANTIZED MODEL RESEARCH</div><h1>Research workspace<span class="title-period">.</span></h1><p class="page-description">Measure the trade-offs. Understand what changes, and why.</p></div>
-          <div class="heading-actions"><button class="button button-secondary" data-go="models">Explore models <span>↗</span></button><button class="button button-primary" data-go="performance"><span class="button-plus">＋</span> New experiment</button></div>
+          <div><div class="eyebrow"><span class="eyebrow-line"></span> QUANTIZED MODEL RESEARCH</div><h1>Benchmark workspace<span class="title-period">.</span></h1><p class="page-description">Run matched tests, compare quality and speed, then review the evidence.</p></div>
+          <div class="heading-actions"><button class="button button-secondary" data-go="models">Explore models <span>↗</span></button><button class="button button-primary" data-go="performance"><span class="button-plus">＋</span> Run benchmark</button></div>
         </div>
 
         <div class="status-strip">
@@ -137,25 +139,25 @@ Solve step by step: if 3x + 5 = 20, what is x? Explain briefly.</textarea>
       </section>
 
       <section class="page" id="page-quality" data-title="Quality evaluation">
-        <div class="page-heading"><div><div class="eyebrow"><span class="eyebrow-line"></span> OUTPUT RELIABILITY</div><h1>Quality evaluation<span class="title-period">.</span></h1><p class="page-description">Test the same questions against each quantization variant and save the evidence.</p></div><span class="page-status-chip" id="promptfoo-chip"><span class="status-dot status-muted"></span> CHECKING PROMPTFOO</span></div>
+        <div class="page-heading"><div><div class="eyebrow"><span class="eyebrow-line"></span> OUTPUT RELIABILITY</div><h1>Quality evaluation<span class="title-period">.</span></h1><p class="page-description">Test the same questions against each quantization variant and save the evidence.</p></div><span class="page-status-chip" id="promptfoo-chip"><span class="status-dot"></span> BUILT-IN EVALUATOR</span></div>
         <div class="quality-layout">
           <div class="quality-main">
             <form id="quality-form" class="panel form-panel">
               <div class="form-section-title"><span class="step-number">01</span><div><h3>Select variants</h3><p>Use the same dataset for every model.</p></div></div><div id="quality-models" class="model-select-list"><div class="empty-state">Loading installed models…</div></div>
               <div class="form-divider"></div>
-              <div class="form-section-title"><span class="step-number">02</span><div><h3>Write reference checks</h3><p>One case per line in the format question || expected phrase.</p></div></div>
+              <div class="form-section-title"><span class="step-number">02</span><div><h3>Add reference answers</h3><p>One test per line: question || expected answer or phrase.</p></div></div>
               <label class="field-label" for="quality-cases">Evaluation cases</label>
               <textarea id="quality-cases" rows="7" required>What is the capital of Japan? || Tokyo
 How many sides does a triangle have? || three
 What is 7 multiplied by 8? || 56
 What gas do plants absorb during photosynthesis? || carbon dioxide</textarea>
               <label class="field"><span class="field-label">Assertion type</span><select id="quality-assertion"><option value="contains" selected>Contains expected phrase</option><option value="equals">Exact answer match</option><option value="not-contains">Must not contain a phrase</option></select></label>
-              <div class="field-grid field-grid-three"><label class="field"><span class="field-label">Temperature</span><select id="quality-temperature"><option selected>0</option><option>0.2</option><option>0.5</option></select></label><label class="field"><span class="field-label">Context length</span><select id="quality-context"><option>1024</option><option selected>2048</option><option>4096</option></select></label><label class="field"><span class="field-label">Output tokens</span><select id="quality-output"><option>64</option><option selected>128</option><option>256</option></select></label></div>
-              <div class="form-footer"><div class="form-hint-block"><span class="info-icon">i</span><span>Requires Promptfoo or npm/npx. Evaluation runs serially to reduce interference.</span></div><button class="button button-primary" type="submit" id="start-quality"><span>✓</span> Run quality checks</button></div>
+              <div class="field-grid field-grid-two"><label class="field"><span class="field-label">Repeat each case</span><select id="quality-repetitions"><option>1</option><option selected>3</option><option>5</option><option>10</option></select></label><label class="field"><span class="field-label">Temperature</span><select id="quality-temperature"><option selected>0</option><option>0.2</option><option>0.5</option></select></label><label class="field"><span class="field-label">Context length</span><select id="quality-context"><option>1024</option><option selected>2048</option><option>4096</option></select></label><label class="field"><span class="field-label">Output tokens</span><select id="quality-output"><option>64</option><option selected>128</option><option>256</option></select></label></div>
+              <div class="form-footer"><div class="form-hint-block"><span class="info-icon">i</span><span>Built-in local evaluation; no extra package required. Runs serially.</span></div><button class="button button-primary" type="submit" id="start-quality"><span>✓</span> Run quality benchmark</button></div>
             </form>
             <section id="quality-job" class="panel job-panel hidden" aria-live="polite"><div class="panel-heading"><div><h3 id="quality-job-title">Quality evaluation</h3><p id="quality-job-subtitle">Waiting for evaluator</p></div><span class="job-state" id="quality-job-state">QUEUED</span></div><div class="progress-track job-progress"><span class="progress-fill fill-green" id="quality-job-progress" style="width:0%"></span></div><div class="job-meta"><span id="quality-job-progress-label">Queued</span><span id="quality-job-id"></span></div><div id="quality-job-result" class="job-result hidden"></div></section>
           </div>
-          <aside class="quality-aside"><section class="panel aside-panel"><div class="panel-heading"><div><h3>How scoring works</h3><p>Current built-in Promptfoo workflow</p></div></div><div class="scoring-explainer"><div class="score-icon">A</div><div><strong>Expected-phrase assertions</strong><p>Checks whether the answer contains a reference phrase, equals it, or avoids it.</p></div></div><div class="scoring-explainer"><div class="score-icon">B</div><div><strong>Same questions, every variant</strong><p>Each selected model is tested against each case using the same assertion rule.</p></div></div><div class="scoring-explainer"><div class="score-icon">C</div><div><strong>Repeat for stronger evidence</strong><p>This first UI runs fixed cases once per model. A full reliability study needs multiple seeds/trials and reference-backed task sets.</p></div></div></section><div class="warning-card"><span class="warning-symbol">!</span><div><strong>Not a hallucination-rate meter</strong><p>Basic phrase checks can miss false claims and reject correct paraphrases. Treat this as a regression screen, not a validated factuality benchmark.</p></div></div></aside>
+          <aside class="quality-aside"><section class="panel aside-panel"><div class="panel-heading"><div><h3>How scoring works</h3><p>Scores shown for each selected model</p></div></div><div class="scoring-explainer"><div class="score-icon">A</div><div><strong>Reference pass rate</strong><p>Checks each answer against the selected contains, equals or not-contains rule.</p></div></div><div class="scoring-explainer"><div class="score-icon">B</div><div><strong>Baseline agreement</strong><p>Compares normalized answer text with the first selected model. Matching text does not guarantee correctness.</p></div></div><div class="scoring-explainer"><div class="score-icon">C</div><div><strong>Repeat consistency</strong><p>Repeats each case and measures how often a model returns the same normalized answer.</p></div></div></section><div class="warning-card"><span class="warning-symbol">!</span><div><strong>Not a hallucination-rate meter</strong><p>Reference checks and exact-text agreement are screening metrics, not semantic grading or validated factuality measurements.</p></div></div></aside>
         </div>
       </section>
 
