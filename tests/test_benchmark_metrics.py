@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 from app import (
     NativeEvaluationRequest,
+    add_baseline_comparisons,
     PromptfooCase,
     estimate_gpu_energy_joules,
     native_quality_worker,
@@ -66,6 +67,40 @@ class SampledEnergyTests(unittest.TestCase):
         )
         self.assertIsNone(result["energy_j"])
         self.assertEqual(result["sample_count"], 0)
+
+
+class PerformanceBaselineComparisonTests(unittest.TestCase):
+    def test_percent_changes_use_baseline_and_keep_direction_neutral(self):
+        summaries = {
+            "reference": {
+                "latency_median_s": 2.0,
+                "ttft_median_s": 0.5,
+                "generation_tokens_per_second_median": 20.0,
+                "peak_sampled_vram_mb": 1000.0,
+            },
+            "quantized": {
+                "latency_median_s": 1.5,
+                "ttft_median_s": 0.4,
+                "generation_tokens_per_second_median": 25.0,
+                "peak_sampled_vram_mb": 750.0,
+            },
+        }
+        result = add_baseline_comparisons(summaries, "reference")
+        changes = result["quantized"]["change_percent_vs_baseline"]
+        self.assertAlmostEqual(changes["latency_median_s"], -25.0)
+        self.assertAlmostEqual(changes["ttft_median_s"], -20.0)
+        self.assertAlmostEqual(changes["generation_tokens_per_second_median"], 25.0)
+        self.assertAlmostEqual(changes["peak_sampled_vram_mb"], -25.0)
+        self.assertAlmostEqual(result["reference"]["change_percent_vs_baseline"]["latency_median_s"], 0.0)
+
+    def test_percentage_is_unavailable_if_baseline_is_zero_or_metric_missing(self):
+        summaries = {
+            "reference": {"latency_median_s": 0.0},
+            "quantized": {"latency_median_s": 1.0},
+        }
+        result = add_baseline_comparisons(summaries, "reference")
+        self.assertIsNone(result["quantized"]["change_percent_vs_baseline"]["latency_median_s"])
+        self.assertIsNone(result["quantized"]["change_percent_vs_baseline"]["generation_tokens_per_second_median"])
 
 
 class NativeWorkerTests(unittest.TestCase):
