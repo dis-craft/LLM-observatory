@@ -726,18 +726,22 @@ def performance_worker(experiment_id: str, config: dict[str, Any]) -> dict[str, 
     sampler_thread.start()
     errors: list[dict[str, Any]] = []
     try:
+        # Warm up every model before measured trials, then pair models on each
+        # prompt/repetition and alternate their order to reduce simple order bias.
         for model in config["models"]:
-            if config["warmups"] and config["prompts"]:
-                for warm_idx in range(config["warmups"]):
-                    try:
-                        stream_chat(model, config["prompts"][0], config["system_prompt"], config["temperature"],
-                                    config["context_length"], config["max_tokens"])
-                    except Exception as exc:
-                        errors.append({"model": model, "phase": "warmup", "error": str(exc)})
-                    completed_units += 1
-                    db_update(experiment_id, progress=min(95, completed_units / max(total_units, 1) * 100))
-            for prompt_idx, prompt in enumerate(config["prompts"]):
-                for repetition in range(config["repetitions"]):
+            for warm_idx in range(config["warmups"]):
+                try:
+                    stream_chat(model, config["prompts"][0], config["system_prompt"], config["temperature"],
+                                config["context_length"], config["max_tokens"])
+                except Exception as exc:
+                    errors.append({"model": model, "phase": "warmup", "error": str(exc)})
+                completed_units += 1
+                db_update(experiment_id, progress=min(95, completed_units / max(total_units, 1) * 100))
+
+        for prompt_idx, prompt in enumerate(config["prompts"]):
+            for repetition_idx in range(config["repetitions"]):
+                model_order = config["models"] if repetition_idx % 2 == 0 else list(reversed(config["models"]))
+                for model in model_order:
                     before = collect_telemetry()
                     started_at = now_iso()
                     started_clock = time.perf_counter()
@@ -750,7 +754,7 @@ def performance_worker(experiment_id: str, config: dict[str, Any]) -> dict[str, 
                         metrics = {}
                         outcome = "failed"
                         error = str(exc)
-                        errors.append({"model": model, "prompt_index": prompt_idx, "repetition": repetition + 1, "error": error})
+                        errors.append({"model": model, "prompt_index": prompt_idx, "repetition": repetition_idx + 1, "error": error})
                     request_end_clock = time.perf_counter()
                     elapsed = request_end_clock - started_clock
                     after = collect_telemetry()
@@ -766,23 +770,24 @@ def performance_worker(experiment_id: str, config: dict[str, Any]) -> dict[str, 
                         request_end_clock,
                         max(1.0, config["sample_interval_s"] * 2.0),
                     )
+                    gpu_samples = [sample.get("gpu") or {} for sample in relevant]
                     trial = {
                         "model": model,
                         "prompt_index": prompt_idx,
                         "prompt": prompt,
-                        "repetition": repetition + 1,
+                        "repetition": repetition_idx + 1,
                         "status": outcome,
                         "started_at": started_at,
                         "elapsed_wall_s": elapsed,
                         "before": before,
                         "after": after,
                         "sample_count_during_request": len(relevant),
-                        "peak_sampled_vram_mb": max((s.get("gpu", {}).get("memory_used_mb") for s in relevant if s.get("gpu") and isinstance(s["gpu"].get("memory_used_mb"), (int, float))), default=None),
-                        "peak_sampled_ram_bytes": max((s.get("ram_used_bytes") for s in relevant if isinstance(s.get("ram_used_bytes"), (int, float))), default=None),
-                        "peak_sampled_cpu_utilization_pct": max((s.get("cpu_utilization_pct") for s in relevant if isinstance(s.get("cpu_utilization_pct"), (int, float))), default=None),
-                        "peak_sampled_gpu_utilization_pct": max((s.get("gpu", {}).get("utilization_pct") for s in relevant if s.get("gpu") and isinstance(s["gpu"].get("utilization_pct"), (int, float))), default=None),
-                        "peak_sampled_gpu_power_w": max((s.get("gpu", {}).get("power_w") for s in relevant if s.get("gpu") and isinstance(s["gpu"].get("power_w"), (int, float))), default=None),
-                        "peak_sampled_gpu_temperature_c": max((s.get("gpu", {}).get("temperature_c") for s in relevant if s.get("gpu") and isinstance(s["gpu"].get("temperature_c"), (int, float))), default=None),
+                        "peak_sampled_vram_mb": max((g.get("memory_used_mb") for g in gpu_samples if isinstance(g.get("memory_used_mb"), (int, float))), default=None),
+                        "peak_sampled_ram_bytes": max((sample.get("ram_used_bytes") for sample in relevant if isinstance(sample.get("ram_used_bytes"), (int, float))), default=None),
+                        "peak_sampled_cpu_utilization_pct": max((sample.get("cpu_utilization_pct") for sample in relevant if isinstance(sample.get("cpu_utilization_pct"), (int, float))), default=None),
+                        "peak_sampled_gpu_utilization_pct": max((g.get("utilization_pct") for g in gpu_samples if isinstance(g.get("utilization_pct"), (int, float))), default=None),
+                        "peak_sampled_gpu_power_w": max((g.get("power_w") for g in gpu_samples if isinstance(g.get("power_w"), (int, float))), default=None),
+                        "peak_sampled_gpu_temperature_c": max((g.get("temperature_c") for g in gpu_samples if isinstance(g.get("temperature_c"), (int, float))), default=None),
                         "gpu_energy_j_estimate": energy["energy_j"],
                         "gpu_energy_coverage_fraction": energy["coverage_fraction"],
                         "gpu_energy_sample_count": energy["sample_count"],
