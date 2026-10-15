@@ -497,8 +497,8 @@ def performance_worker(experiment_id: str, config: dict[str, Any]) -> dict[str, 
                         trial["error"] = error
                     trials.append(trial)
                     completed_units += 1
-                    db_update(experiment_id, progress=min(99, completed_units / max(total_units, 1) * 100),
-                              result_json=json.dumps({"trials": trials, "errors": errors}, ensure_ascii=False))
+                    # Avoid serializing and writing the growing result set for every trial; this reduces observer overhead.
+                    db_update(experiment_id, progress=min(99, completed_units / max(total_units, 1) * 100))
     finally:
         stop_sampling.set()
         sampler_thread.join(timeout=3)
