@@ -52,10 +52,10 @@
 ## 2. How a performance experiment runs
 
 1. Select installed Ollama model tags, choose a reference baseline, and select a workload profile or enter fixed custom prompts.
-2. Workload profiles are Balanced edge workload, Prompt processing (long input/short output), Generation (short input/longer output), and Long-context retrieval. The text presets do not guarantee exact token counts; inspect actual runtime-reported prompt/output token counts.
+2. Workload profiles are Balanced edge workload, Prompt processing (long input/short output), Generation (short input/longer output), Long-context retrieval from synthetic logs, Long input + long answer from synthetic logs, and Custom prompts. The text presets do not guarantee exact token counts; inspect actual runtime-reported prompt/output token counts.
 3. Configure repetitions, warm-up requests, temperature, context length, output-token limit, system prompt and telemetry sampling interval.
-4. The runner processes models, prompts and repetitions **serially in selected model order**. It sends each prompt as a fresh user message with the configured system prompt. The result records the selected baseline and percentage changes for performance metrics.
-5. Warm-up requests are excluded from measured-trial summaries. With the default of one warm-up, the first request commonly warms/loads the model before measured requests.
+4. The runner warms each model, then pairs models on each prompt/repetition and alternates model order on successive repetitions to reduce simple order bias. It sends each prompt as a fresh user message with the configured system prompt. The result records the selected baseline and percentage changes for performance metrics.
+5. Warm-up requests are excluded from measured-trial summaries. With the default of one warm-up, the first request commonly warms/loads the model before measured requests; the runner does not force an unload, so the recorded load duration is not a controlled cold-start metric.
 6. For every measured request, capture a pre-request snapshot, timestamp the request, collect streamed output and Ollama's final timing/token statistics, then capture an after-request snapshot.
 7. A separate telemetry sampler records system/GPU snapshots while the workload runs. The runner records the count of samples in the request window and peak sampled RAM/VRAM for that window.
 8. Results and configuration are saved to SQLite. The full run contains trials, summaries, telemetry samples and interpretation notes.
