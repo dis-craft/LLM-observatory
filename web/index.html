@@ -3,202 +3,157 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#111614">
-  <meta name="description" content="A local research workspace for benchmarking quantized language models.">
-  <title>LLM Observatory — Research Workspace</title>
+  <meta name="theme-color" content="#111512">
+  <meta name="description" content="A local, reproducible benchmark dashboard for quantized language models.">
+  <title>LLM Observatory — Benchmark</title>
   <link rel="stylesheet" href="/assets/styles.css">
   <script defer src="/assets/app.js"></script>
 </head>
 <body>
-  <div class="app-shell">
-    <aside class="sidebar">
-      <a class="brand" href="/" aria-label="LLM Observatory home">
-        <span class="brand-mark"><svg viewBox="0 0 40 40" aria-hidden="true"><path d="M20 3.5 35 12v16L20 36.5 5 28V12z" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="20" cy="20" r="7" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M20 8v5M20 27v5M8 20h5M27 20h5M11.5 11.5l3.6 3.6M24.9 24.9l3.6 3.6M28.5 11.5l-3.6 3.6M15.1 24.9l-3.6 3.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>
-        <span class="brand-copy"><strong>LLM Observatory</strong><small>LOCAL RESEARCH LAB</small></span>
-      </a>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="LLM Observatory home">
+      <span class="brand-mark" aria-hidden="true">O</span>
+      <span><strong>LLM Observatory</strong><small>QUANTIZED MODEL BENCHMARK</small></span>
+    </a>
+    <div class="header-actions">
+      <span class="connection-pill" id="runtime-state"><span class="dot"></span> Checking Ollama…</span>
+      <button class="button button-quiet" id="refresh-all" type="button">Refresh</button>
+    </div>
+  </header>
 
-      <div class="nav-label">BENCHMARK</div>
-      <nav class="primary-nav" aria-label="Primary navigation">
-        <button class="nav-item active" data-page="overview"><span class="nav-icon">⌂</span><span>Overview</span></button>
-        <button class="nav-item" data-page="performance"><span class="nav-icon">◷</span><span>Run benchmark</span></button>
-        <button class="nav-item" data-page="quality"><span class="nav-icon">✓</span><span>Quality checks</span></button>
-        <button class="nav-item" data-page="results"><span class="nav-icon">↗</span><span>Results</span></button>
-      </nav>
+  <main class="wrap">
+    <section class="intro">
+      <p class="eyebrow">PERFORMANCE + RELIABILITY</p>
+      <h1>Benchmark the model.<br><span>Not the guess.</span></h1>
+      <p class="intro-copy">Choose a workload, run the same requests against each selected model, and compare measured results with an explicit reference baseline.</p>
+    </section>
 
-      <details class="advanced-nav">
-        <summary>Advanced tools</summary>
-        <nav class="primary-nav" aria-label="Advanced tools">
-          <button class="nav-item" data-page="models"><span class="nav-icon">◈</span><span>Model registry</span></button>
-          <button class="nav-item" data-page="standard"><span class="nav-icon">▤</span><span>Standard benchmarks</span></button>
-          <button class="nav-item" data-page="hardware"><span class="nav-icon">▦</span><span>Hardware telemetry</span></button>
-          <button class="nav-item" data-page="integrations"><span class="nav-icon">⌘</span><span>Integrations</span></button>
-        </nav>
-      </details>
+    <section class="runtime-strip" aria-label="Runtime details">
+      <div><span>Runtime</span><strong id="runtime-version">Checking…</strong></div>
+      <div><span>Installed models</span><strong id="model-count">—</strong></div>
+      <div><span>GPU telemetry</span><strong id="gpu-status">Checking…</strong></div>
+      <div><span>Data storage</span><strong>Local SQLite</strong></div>
+    </section>
 
-      <div class="sidebar-bottom">
-        <div class="connection-card">
-          <span class="status-dot" id="sidebar-ollama-dot"></span>
-          <div><strong id="sidebar-ollama-status">Checking Ollama</strong><small id="sidebar-ollama-host">127.0.0.1:11434</small></div>
-          <button class="icon-button tiny" id="sidebar-refresh" title="Refresh connection" aria-label="Refresh connection">↻</button>
-        </div>
-        <p class="sidebar-note">Local-first. Prompts and experiment data stay on this machine unless you configure otherwise.</p>
-        <div class="sidebar-footer"><span class="footer-orb"></span><span>OBSERVATORY <b>v2.0</b></span><span class="footer-separator">·</span><span>LOCAL MODE</span></div>
+    <div id="connection-note" class="notice" role="status">Checking local Ollama connection and available models…</div>
+
+    <section class="card" id="configuration">
+      <div class="section-head">
+        <div><span class="step">01</span><div><h2>Configure the experiment</h2><p>Use one baseline and matched settings for all variants.</p></div></div>
       </div>
-    </aside>
 
-    <main class="main-area">
-      <header class="topbar">
-        <div class="breadcrumbs"><span>Workspace</span><span class="crumb-slash">/</span><strong id="current-breadcrumb">Overview</strong></div>
-        <div class="topbar-right"><span class="local-chip"><span class="status-dot"></span> LOCAL ENVIRONMENT</span><span class="topbar-divider"></span><span class="update-time" id="last-updated">Waiting for telemetry</span><button class="icon-button" id="refresh-all" title="Refresh data" aria-label="Refresh data">↻</button></div>
-      </header>
+      <div class="subsection">
+        <label class="field-title">Models to compare</label>
+        <p class="helper">Select the reference model and every quantized variant you want to test. Requests run serially to avoid running both evaluations at once.</p>
+        <div id="model-choices" class="model-choices"><p class="empty">Loading models from Ollama…</p></div>
+        <label class="field field-baseline" for="baseline-model"><span class="field-title">Reference baseline</span>
+          <select id="baseline-model" required><option value="">Waiting for models…</option></select>
+          <small>The baseline must also be checked above. All percentage changes refer to this model.</small>
+        </label>
+      </div>
 
-      <div id="global-alert" class="global-alert hidden" role="status"></div>
-
-      <section class="page active" id="page-overview" data-title="Overview">
-        <div class="page-heading heading-with-actions">
-          <div><div class="eyebrow"><span class="eyebrow-line"></span> QUANTIZED MODEL RESEARCH</div><h1>Benchmark workspace<span class="title-period">.</span></h1><p class="page-description">Run matched tests, compare quality and speed, then review the evidence.</p></div>
-          <div class="heading-actions"><button class="button button-secondary" data-go="models">Explore models <span>↗</span></button><button class="button button-primary" data-go="performance"><span class="button-plus">＋</span> Run benchmark</button></div>
-        </div>
-
-        <div class="status-strip">
-          <div class="strip-main"><span class="status-pulse" id="overview-status-pulse"></span><div><strong id="overview-status-title">Connecting to local runtime</strong><span id="overview-status-copy">Checking Ollama and hardware telemetry</span></div></div>
-          <div class="strip-meta"><span class="micro-label">INFERENCE RUNTIME</span><strong id="runtime-version">Ollama · checking</strong></div>
-          <div class="strip-meta"><span class="micro-label">INSTALLED MODELS</span><strong id="runtime-model-count">—</strong></div>
-          <div class="strip-meta strip-meta-last"><span class="micro-label">DATA STORAGE</span><strong><span class="tiny-status"></span> Persistent · SQLite</strong></div>
-        </div>
-
-        <div class="section-heading"><div><h2>Live system snapshot</h2><p>Sampled system and device readings — not isolated model-only usage.</p></div><span class="refresh-label"><span class="refresh-dot"></span> AUTO REFRESH · 2S</span></div>
-        <div class="metric-grid">
-          <article class="metric-card"><div class="metric-top"><span>System memory</span><span class="metric-symbol symbol-green">▦</span></div><div class="metric-value"><span id="metric-ram">—</span><small>GB</small></div><div class="metric-sub"><span id="metric-ram-detail">Waiting for reading</span></div><div class="progress-track"><span class="progress-fill fill-green" id="ram-progress" style="width:0%"></span></div><div class="metric-foot"><span>RAM utilization</span><strong id="metric-ram-pct">—</strong></div></article>
-          <article class="metric-card"><div class="metric-top"><span>GPU memory</span><span class="metric-symbol symbol-blue">▧</span></div><div class="metric-value"><span id="metric-vram">—</span><small>GB</small></div><div class="metric-sub"><span id="metric-vram-detail">NVIDIA telemetry</span></div><div class="progress-track"><span class="progress-fill fill-blue" id="vram-progress" style="width:0%"></span></div><div class="metric-foot"><span>VRAM utilization</span><strong id="metric-vram-pct">—</strong></div></article>
-          <article class="metric-card"><div class="metric-top"><span>GPU utilization</span><span class="metric-symbol symbol-lilac">⌁</span></div><div class="metric-value"><span id="metric-gpu-util">—</span><small>%</small></div><div class="metric-sub" id="metric-gpu-name">GPU not detected</div><div class="sparkline-wrap"><canvas id="gpuSparkline" aria-label="Recent GPU utilization"></canvas></div><div class="metric-foot"><span>Device-wide reading</span><strong id="metric-gpu-temp">— °C</strong></div></article>
-          <article class="metric-card"><div class="metric-top"><span>Ollama process RSS</span><span class="metric-symbol symbol-amber">◫</span></div><div class="metric-value"><span id="metric-ollama-rss">—</span><small>MB</small></div><div class="metric-sub"><span id="metric-ollama-cpu">Process CPU —</span></div><div class="metric-inline-note"><span class="status-dot"></span><span id="metric-loaded-models">No loaded model reported</span></div><div class="metric-foot"><span>Runtime process memory</span><strong id="metric-process-count">—</strong></div></article>
-        </div>
-
-        <div class="overview-columns">
-          <section class="panel chart-panel">
-            <div class="panel-heading"><div><h3>Resource activity</h3><p>System utilization sampled over this session</p></div><div class="legend"><span><i class="legend-dot legend-cpu"></i> CPU</span><span><i class="legend-dot legend-gpu"></i> GPU</span></div></div>
-            <div class="chart-stat-row"><div><span class="chart-stat-label">CPU UTILIZATION</span><strong id="chart-cpu-current">—%</strong></div><div><span class="chart-stat-label">GPU UTILIZATION</span><strong id="chart-gpu-current">—%</strong></div><span class="chart-range">RECENT SAMPLES</span></div>
-            <canvas id="resourceChart" class="main-chart" aria-label="CPU and GPU utilization over time"></canvas>
-            <div class="chart-axis"><span>Oldest sample</span><span>Now</span></div>
-            <p class="chart-footnote"><span class="info-icon">i</span> Shared-device telemetry may include other applications. Values are sampled, not per-request attribution.</p>
-          </section>
-          <section class="panel experiment-panel">
-            <div class="panel-heading"><div><h3>Research pipeline</h3><p>From observations to defensible results</p></div><span class="mini-badge">WORKFLOW</span></div>
-            <div class="pipeline-step"><div class="pipeline-icon completed">✓</div><div class="pipeline-copy"><strong>Model registry</strong><span>Inspect installed variants and quantization</span></div><span class="pipeline-state good">READY</span></div>
-            <div class="pipeline-step"><div class="pipeline-icon" id="pipeline-perf-icon">02</div><div class="pipeline-copy"><strong>Performance experiments</strong><span>Repeated latency, throughput and telemetry</span></div><button class="text-link" data-go="performance">Open →</button></div>
-            <div class="pipeline-step"><div class="pipeline-icon" id="pipeline-quality-icon">03</div><div class="pipeline-copy"><strong>Quality evaluation</strong><span>Reference checks through Promptfoo</span></div><button class="text-link" data-go="quality">Open →</button></div>
-            <div class="pipeline-step"><div class="pipeline-icon">04</div><div class="pipeline-copy"><strong>Compare & report</strong><span>Saved runs, variability and caveats</span></div><button class="text-link" data-go="results">Review →</button></div>
-            <div class="pipeline-callout"><span class="callout-icon">✳</span><span><strong>Research note</strong> Quality, speed, memory and energy are separate outcomes. This workspace does not infer hallucination rate or per-request energy from hardware telemetry.</span></div>
-          </section>
-        </div>
-
-        <section class="panel model-preview-panel"><div class="panel-heading"><div><h3>Installed model registry</h3><p>Variants available to your local Ollama runtime</p></div><button class="text-link" data-go="models">View all models ↗</button></div><div class="table-wrap"><table><thead><tr><th>MODEL</th><th>PARAMETERS</th><th>QUANTIZATION</th><th>FILE SIZE</th><th>MODIFIED</th><th>STATUS</th></tr></thead><tbody id="overview-models"><tr><td colspan="6" class="empty-state">Loading installed models…</td></tr></tbody></table></div></section>
-      </section>
-
-      <section class="page" id="page-models" data-title="Model registry">
-        <div class="page-heading"><div><div class="eyebrow"><span class="eyebrow-line"></span> INVENTORY</div><h1>Model registry<span class="title-period">.</span></h1><p class="page-description">Inspect the exact local model variants before comparing them.</p></div><button class="button button-secondary" id="reload-models">↻ Refresh registry</button></div>
-        <div class="model-summary-row"><div class="summary-tile"><span>INSTALLED VARIANTS</span><strong id="models-total">—</strong></div><div class="summary-tile"><span>QUANTIZATION TYPES</span><strong id="models-quants">—</strong></div><div class="summary-tile"><span>RUNTIME</span><strong id="models-runtime">Ollama</strong></div></div>
-        <div class="model-grid" id="models-grid"><div class="panel empty-state">Checking Ollama models…</div></div>
-        <div class="notice-card"><span class="info-icon">i</span><div><strong>Interpretation note</strong><p>Model file size is not runtime RAM or VRAM usage. Ollama-reported quantization metadata is shown as provided by the runtime; it does not necessarily mean every weight uses exactly the nominal bit width.</p></div></div>
-      </section>
-
-      <section class="page" id="page-performance" data-title="Run benchmark">
-        <div class="page-heading"><div><div class="eyebrow"><span class="eyebrow-line"></span> CONTROLLED MEASUREMENT</div><h1>Run benchmark<span class="title-period">.</span></h1><p class="page-description">Run matched prompts repeatedly, then compare latency, throughput and observed resource use.</p></div><span class="page-status-chip"><span class="status-dot"></span> SERIAL REQUESTS</span></div>
-        <div class="experiment-layout">
-          <div class="experiment-main">
-            <form id="performance-form" class="panel form-panel">
-              <div class="form-section-title"><span class="step-number">01</span><div><h3>Choose model variants</h3><p>Use the same base model family when isolating quantization effects.</p></div></div>
-              <div id="performance-models" class="model-select-list"><div class="empty-state">Load models from Ollama to continue.</div></div>
-              <label class="field"><span class="field-label" for="performance-baseline">Reference baseline</span><select id="performance-baseline" required></select><span class="field-hint">All performance and memory changes are compared against this model.</span></label>
-              <div class="form-divider"></div>
-              <div class="form-section-title"><span class="step-number">02</span><div><h3>Define the workload</h3><p>Each prompt is sent independently, in sequence, to each selected variant.</p></div></div>
-              <label class="field"><span class="field-label" for="workload-profile">Benchmark workload</span><select id="workload-profile"><option value="balanced" selected>Balanced edge workload</option><option value="prefill">Prompt processing · long input, short answer</option><option value="decode">Generation · short input, long answer</option><option value="retrieval">Long-context retrieval</option><option value="custom">Custom prompts</option></select><span id="workload-description" class="field-hint">Mixed short questions; same prompts are used for every selected model.</span></label><label class="field-label" for="performance-prompts">Prompts <span class="field-hint">One prompt per line</span></label>
-              <textarea id="performance-prompts" rows="5" required>Explain why the sky appears blue in two sentences.
+      <div class="subsection">
+        <label class="field-title" for="workload-profile">Workload</label>
+        <select id="workload-profile">
+          <option value="balanced">Balanced edge workload — short mixed tasks</option>
+          <option value="prefill">Prompt processing — long input, short answer</option>
+          <option value="decode">Generation — short input, long answer</option>
+          <option value="retrieval">Long-context retrieval — find a known fact</option>
+          <option value="long">Long input + long answer — synthesis</option>
+          <option value="custom">Custom prompts</option>
+        </select>
+        <p id="workload-description" class="helper">Three mixed prompts. The same prompt set is sent to every selected model.</p>
+        <label class="field-title" for="performance-prompts">Prompts <span class="helper inline">one prompt per line</span></label>
+        <textarea id="performance-prompts" rows="5" spellcheck="false">Explain why the sky appears blue in two sentences.
 What is the difference between RAM and VRAM?
 Solve step by step: if 3x + 5 = 20, what is x? Explain briefly.</textarea>
-              <div class="field-grid field-grid-three">
-                <label class="field"><span class="field-label">Measured repetitions</span><select id="performance-repetitions"><option>3</option><option selected>5</option><option>10</option><option>20</option></select></label>
-                <label class="field"><span class="field-label">Warm-up requests</span><select id="performance-warmups"><option>0</option><option selected>1</option><option>2</option></select></label>
-                <label class="field"><span class="field-label">Context length</span><select id="performance-context"><option>512</option><option>1024</option><option selected>2048</option><option>4096</option><option>8192</option><option>16384</option></select></label>
-              </div>
-              <div class="field-grid field-grid-two">
-                <label class="field"><span class="field-label">Maximum output tokens</span><select id="performance-output"><option>32</option><option>64</option><option selected>128</option><option>256</option><option>512</option><option>1024</option></select></label>
-                <label class="field"><span class="field-label">Temperature <output id="temperature-value">0.0</output></span><input id="performance-temperature" type="range" min="0" max="1" step="0.1" value="0"><span class="range-labels"><span>Deterministic</span><span>More variable</span></span></label>
-              </div>
-              <label class="field-label" for="performance-system">System prompt</label><textarea id="performance-system" rows="2">You are a helpful assistant. Answer the prompt clearly and accurately.</textarea>
-              <div class="form-footer"><div class="form-hint-block"><span class="info-icon">i</span><span>Requests run sequentially. Actual prompt/output token counts are recorded; resource samples can miss short peaks.</span></div><button class="button button-primary" type="submit" id="start-performance"><span>▶</span> Run performance experiment</button></div>
-            </form>
-            <section id="performance-job" class="panel job-panel hidden" aria-live="polite"><div class="panel-heading"><div><h3 id="performance-job-title">Experiment queued</h3><p id="performance-job-subtitle">Preparing measurements</p></div><span class="job-state" id="performance-job-state">QUEUED</span></div><div class="progress-track job-progress"><span class="progress-fill fill-green" id="performance-job-progress" style="width:0%"></span></div><div class="job-meta"><span id="performance-job-progress-label">0% complete</span><span id="performance-job-id"></span></div><div id="performance-job-result" class="job-result hidden"></div></section>
-          </div>
-          <aside class="experiment-aside">
-            <section class="panel aside-panel"><div class="panel-heading"><div><h3>Metrics recorded</h3><p>Per-request results</p></div></div><div class="measure-list"><div><span class="measure-check">✓</span><div><strong>Time to first token</strong><small>Client-measured stream timing</small></div></div><div><span class="measure-check">✓</span><div><strong>Prompt throughput</strong><small>Tokens per second from Ollama stats</small></div></div><div><span class="measure-check">✓</span><div><strong>Generation throughput</strong><small>Tokens per second from Ollama stats</small></div></div><div><span class="measure-check">✓</span><div><strong>Latency distribution</strong><small>Median, mean and 95th percentile</small></div></div><div><span class="measure-check">✓</span><div><strong>RAM / VRAM observations</strong><small>Sampled system/device data</small></div></div><div><span class="measure-check">✓</span><div><strong>Estimated GPU energy</strong><small>Sampled device-wide estimate; short requests may not have enough samples</small></div></div></div></section>
-            <section class="panel aside-panel protocol-panel"><div class="panel-heading"><div><h3>Protocol checklist</h3><p>Before you trust the comparison</p></div></div><ul class="checklist"><li>Same prompts and system prompt</li><li>Same context and output limits</li><li>Warm-up requests excluded from summaries</li><li>Repeated trials and variability reported</li><li>Background workloads minimized</li><li>Cold-load and warm inference interpreted separately</li></ul></section>
-            <div class="subtle-note"><span class="info-icon">i</span><p>Ollama's prompt and generation durations are runtime-reported. TTFT is measured at the local HTTP stream. These timing definitions are recorded separately.</p></div>
-          </aside>
-        </div>
-      </section>
+      </div>
 
-      <section class="page" id="page-quality" data-title="Quality checks">
-        <div class="page-heading"><div><div class="eyebrow"><span class="eyebrow-line"></span> OUTPUT RELIABILITY</div><h1>Quality checks<span class="title-period">.</span></h1><p class="page-description">Test the same questions against each quantization variant and save the evidence.</p></div><span class="page-status-chip" id="promptfoo-chip"><span class="status-dot"></span> BUILT-IN EVALUATOR</span></div>
-        <div class="quality-layout">
-          <div class="quality-main">
-            <form id="quality-form" class="panel form-panel">
-              <div class="form-section-title"><span class="step-number">01</span><div><h3>Select variants</h3><p>Choose the baseline explicitly, then select the variants to compare.</p></div></div><label class="field"><span class="field-label">Reference baseline</span><select id="quality-baseline" required></select><span class="field-hint">The baseline must also be checked below.</span></label><div id="quality-models" class="model-select-list"><div class="empty-state">Loading installed models…</div></div>
-              <div class="form-divider"></div>
-              <div class="form-section-title"><span class="step-number">02</span><div><h3>Add reference answers</h3><p>One test per line: question || expected answer or phrase.</p></div></div>
-              <label class="field-label" for="quality-cases">Evaluation cases</label>
-              <textarea id="quality-cases" rows="7" required>What is the capital of Japan? || Tokyo
+      <div class="subsection">
+        <p class="field-title">Matched generation settings</p>
+        <div class="controls-grid">
+          <label class="field"><span>Measured repetitions</span><select id="performance-repetitions"><option>3</option><option selected>5</option><option>10</option><option>20</option></select></label>
+          <label class="field"><span>Warm-up requests per model</span><select id="performance-warmups"><option>0</option><option selected>1</option><option>2</option><option>3</option></select></label>
+          <label class="field"><span>Context limit</span><select id="performance-context"><option>512</option><option>1024</option><option selected>2048</option><option>4096</option><option>8192</option><option>16384</option></select></label>
+          <label class="field"><span>Output-token cap</span><select id="performance-output"><option>32</option><option>64</option><option selected>128</option><option>256</option><option>512</option><option>1024</option></select></label>
+          <label class="field"><span>Temperature</span><select id="performance-temperature"><option value="0" selected>0 — deterministic decoding</option><option value="0.2">0.2</option><option value="0.5">0.5</option><option value="0.8">0.8</option></select></label>
+          <label class="field"><span>Telemetry sample interval</span><select id="sample-interval"><option value="0.5">0.5 seconds</option><option value="1" selected>1 second</option><option value="2">2 seconds</option><option value="5">5 seconds</option></select></label>
+        </div>
+        <details class="advanced-settings">
+          <summary>System prompt (advanced)</summary>
+          <textarea id="performance-system" rows="2">You are a helpful assistant. Answer the prompt clearly and accurately.</textarea>
+          <p class="helper">This exact system prompt is shared by the performance and quality runs.</p>
+        </details>
+      </div>
+
+      <div class="action-row">
+        <button class="button button-primary" type="button" id="start-performance">Run performance benchmark</button>
+        <span class="action-help">Measures latency, throughput, sampled resources and available GPU-energy estimates.</span>
+      </div>
+    </section>
+
+    <section class="card" id="quality-section">
+      <div class="section-head">
+        <div><span class="step">02</span><div><h2>Evaluate answer quality separately</h2><p>Use fixed reference answers. This run is separate so grading does not compete with performance measurements.</p></div></div>
+      </div>
+      <label class="field-title" for="quality-cases">Reference cases <span class="helper inline">one per line: question || expected answer or phrase</span></label>
+      <textarea id="quality-cases" rows="7" spellcheck="false">What is the capital of Japan? || Tokyo
 How many sides does a triangle have? || three
 What is 7 multiplied by 8? || 56
-What gas do plants absorb during photosynthesis? || carbon dioxide</textarea>
-              <label class="field"><span class="field-label">Assertion type</span><select id="quality-assertion"><option value="contains" selected>Contains expected phrase</option><option value="equals">Exact answer match</option><option value="not-contains">Must not contain a phrase</option></select></label>
-              <div class="field-grid field-grid-two"><label class="field"><span class="field-label">Repeat each case</span><select id="quality-repetitions"><option>1</option><option selected>3</option><option>5</option><option>10</option></select></label><label class="field"><span class="field-label">Temperature</span><select id="quality-temperature"><option selected>0</option><option>0.2</option><option>0.5</option></select></label><label class="field"><span class="field-label">Context length</span><select id="quality-context"><option>1024</option><option selected>2048</option><option>4096</option></select></label><label class="field"><span class="field-label">Output tokens</span><select id="quality-output"><option>64</option><option selected>128</option><option>256</option></select></label></div>
-              <div class="form-footer"><div class="form-hint-block"><span class="info-icon">i</span><span>Built-in local evaluation; no extra package required. Runs serially.</span></div><button class="button button-primary" type="submit" id="start-quality"><span>✓</span> Run quality benchmark</button></div>
-            </form>
-            <section id="quality-job" class="panel job-panel hidden" aria-live="polite"><div class="panel-heading"><div><h3 id="quality-job-title">Quality evaluation</h3><p id="quality-job-subtitle">Waiting for evaluator</p></div><span class="job-state" id="quality-job-state">QUEUED</span></div><div class="progress-track job-progress"><span class="progress-fill fill-green" id="quality-job-progress" style="width:0%"></span></div><div class="job-meta"><span id="quality-job-progress-label">Queued</span><span id="quality-job-id"></span></div><div id="quality-job-result" class="job-result hidden"></div></section>
-          </div>
-          <aside class="quality-aside"><section class="panel aside-panel"><div class="panel-heading"><div><h3>How scoring works</h3><p>Scores shown for each selected model</p></div></div><div class="scoring-explainer"><div class="score-icon">A</div><div><strong>Reference pass rate</strong><p>Checks each answer against the selected contains, equals or not-contains rule.</p></div></div><div class="scoring-explainer"><div class="score-icon">B</div><div><strong>Baseline agreement</strong><p>Compares normalized answer text with the baseline selected above. Matching text does not guarantee correctness.</p></div></div><div class="scoring-explainer"><div class="score-icon">C</div><div><strong>Repeat consistency</strong><p>Repeats each case and measures how often a model returns the same normalized answer.</p></div></div></section><div class="warning-card"><span class="warning-symbol">!</span><div><strong>Not a hallucination-rate meter</strong><p>Reference checks and exact-text agreement are screening metrics, not semantic grading or validated factuality measurements.</p></div></div></aside>
-        </div>
+What gas do plants absorb during photosynthesis? || carbon dioxide
+If x + 9 = 14, what is x? || 5
+Name the largest planet in the Solar System. || Jupiter
+Return only the word "ready" and nothing else. || ready
+What is 100 divided by 4? || 25</textarea>
+      <div class="quality-options">
+        <label class="field"><span>Reference rule</span><select id="quality-assertion"><option value="contains" selected>Contains expected phrase</option><option value="equals">Normalized exact-text match</option><option value="not-contains">Must not contain a phrase</option></select></label>
+        <p class="helper">The rule is a basic reference check, not semantic grading. Review the dataset before making research claims.</p>
+      </div>
+      <div class="action-row">
+        <button class="button button-secondary" type="button" id="start-quality">Run quality benchmark</button>
+        <span class="action-help">Uses the same selected models, baseline, temperature, context limit, output cap and system prompt.</span>
+      </div>
+    </section>
+
+    <section class="card hidden" id="job-card" aria-live="polite">
+      <div class="job-head"><div><span class="eyebrow">RUNNING LOCALLY</span><h2 id="job-title">Benchmark</h2><p id="job-message">Waiting for the runner…</p></div><span class="job-status" id="job-status">QUEUED</span></div>
+      <div class="progress"><span id="job-progress" style="width:0%"></span></div>
+      <div class="job-footer"><span id="job-progress-label">0%</span><span id="job-id"></span></div>
+    </section>
+
+    <section class="card" id="results-section">
+      <div class="section-head">
+        <div><span class="step">03</span><div><h2>Compare the evidence</h2><p>Only values returned by the runner are shown. Missing samples are shown as unavailable, not guessed.</p></div></div>
+        <button class="button button-quiet" id="export-results" type="button">Export JSON</button>
+      </div>
+
+      <section class="result-block">
+        <div class="result-title"><div><h3>Performance</h3><p id="performance-summary-note">Run a performance benchmark to populate this comparison.</p></div></div>
+        <div id="performance-results" class="result-content"><p class="empty">No performance run in this session yet. Saved runs are listed below.</p></div>
       </section>
-
-      <section class="page" id="page-standard" data-title="Standard benchmarks">
-        <div class="page-heading"><div><div class="eyebrow"><span class="eyebrow-line"></span> EXTERNAL EVALUATORS</div><h1>Standard benchmarks<span class="title-period">.</span></h1><p class="page-description">Use established evaluation frameworks where their task and API assumptions fit.</p></div></div>
-        <div class="integration-feature-grid">
-          <article class="panel integration-feature"><div class="integration-feature-top"><span class="integration-logo logo-lm">LM</span><span class="availability-chip" id="lm-eval-status">Checking</span></div><h3>LM Evaluation Harness</h3><p>Run selected generation-style tasks through Ollama's local OpenAI-compatible chat endpoint. The available task set depends on your installed harness version.</p><form id="lm-eval-form"><label class="field"><span class="field-label">Model</span><select id="lm-eval-model" required></select></label><label class="field"><span class="field-label">Task</span><select id="lm-eval-task"><option value="gsm8k">GSM8K · grade-school math</option><option value="truthfulqa_gen">TruthfulQA · generation</option><option value="ifeval">IFEval · instruction following</option></select></label><label class="field"><span class="field-label">Evaluation limit</span><select id="lm-eval-limit"><option>10</option><option selected>25</option><option>50</option><option>100</option></select></label><button class="button button-primary button-wide" type="submit" id="start-lm-eval">Run selected task</button></form><div class="inline-tool-note" id="lm-eval-help">Checking local installation…</div></article>
-          <article class="panel integration-feature"><div class="integration-feature-top"><span class="integration-logo logo-bench">B</span><span class="availability-chip">External CLI</span></div><h3>llama-bench</h3><p>Benchmarks GGUF model files using the llama.cpp backend, separating prompt processing and generation speed with repeatable runs.</p><div class="capability-list"><span>Prompt tokens/s</span><span>Generation tokens/s</span><span>CSV / JSON results</span></div><div class="inline-tool-note">This is a separate runtime from Ollama. Import its CSV/JSON output under Results; keep backend labels distinct in reports.</div><a class="button button-secondary button-wide external-link" href="https://github.com/ggml-org/llama.cpp/tree/master/tools/llama-bench" target="_blank" rel="noreferrer">Open llama-bench docs ↗</a></article>
-          <article class="panel integration-feature"><div class="integration-feature-top"><span class="integration-logo logo-nvidia">N</span><span class="availability-chip" id="nsys-status">Checking</span></div><h3>NVIDIA Nsight Systems</h3><p>Advanced CPU/GPU timeline profiling to investigate execution bottlenecks. It is diagnostic, not a replacement for controlled benchmark runs.</p><div class="capability-list"><span>Execution timeline</span><span>CPU / GPU tracing</span><span>Advanced profiling</span></div><div class="inline-tool-note" id="nsys-help">Checking whether nsys is available on PATH…</div><a class="button button-secondary button-wide external-link" href="https://developer.nvidia.com/nsight-systems" target="_blank" rel="noreferrer">Open Nsight Systems docs ↗</a></article>
-        </div>
-        <div id="lm-eval-job" class="panel job-panel hidden" aria-live="polite"><div class="panel-heading"><div><h3 id="lm-eval-job-title">Standard benchmark</h3><p id="lm-eval-job-subtitle">Queued</p></div><span class="job-state" id="lm-eval-job-state">QUEUED</span></div><div class="job-meta"><span id="lm-eval-job-progress-label">Running in the background</span><span id="lm-eval-job-id"></span></div><div id="lm-eval-job-result" class="job-result hidden"></div></div>
-        <div class="notice-card"><span class="info-icon">i</span><div><strong>Task compatibility matters</strong><p>Ollama's OpenAI-compatible chat endpoint is generation-oriented. Tasks needing logits, log probabilities or likelihood scoring may not be supported through this adapter. Verify the task output type before interpreting scores.</p></div></div>
+      <section class="result-block">
+        <div class="result-title"><div><h3>Quality and reliability</h3><p id="quality-summary-note">Reference pass rate, exact-text match, baseline agreement and repeat consistency.</p></div></div>
+        <div id="quality-results" class="result-content"><p class="empty">Run quality checks separately from performance.</p></div>
       </section>
-
-      <section class="page" id="page-results" data-title="Results & reports">
-        <div class="page-heading heading-with-actions"><div><div class="eyebrow"><span class="eyebrow-line"></span> EXPERIMENT RECORDS</div><h1>Results & reports<span class="title-period">.</span></h1><p class="page-description">Persistent run history for comparison, review and export.</p></div><div class="heading-actions"><button class="button button-secondary" id="export-results">↓ Export all JSON</button><button class="button button-primary" data-go="performance">＋ New run</button></div></div>
-        <div class="results-summary" id="results-summary"><div class="summary-tile"><span>SAVED RUNS</span><strong>—</strong></div><div class="summary-tile"><span>COMPLETED</span><strong>—</strong></div><div class="summary-tile"><span>FAILED</span><strong>—</strong></div></div>
-        <section class="panel results-panel"><div class="panel-heading"><div><h3>Experiment history</h3><p>Stored locally in SQLite across dashboard sessions</p></div><button class="text-link" id="refresh-results">↻ Refresh</button></div><div class="table-wrap"><table><thead><tr><th>EXPERIMENT</th><th>TYPE</th><th>CREATED</th><th>STATUS</th><th>PROGRESS</th><th></th></tr></thead><tbody id="results-table"><tr><td colspan="6" class="empty-state">Loading experiment history…</td></tr></tbody></table></div></section>
-        <section class="panel import-panel"><div class="import-copy"><span class="import-icon">⇧</span><div><h3>Import an external benchmark</h3><p>Bring in llama-bench or other CSV/JSON results. Imported data stays labeled separately because measurement methods and backends can differ.</p></div></div><div class="import-controls"><input type="file" id="import-file" accept=".csv,.json,application/json,text/csv"><button class="button button-secondary" id="import-results">Import file</button></div><div id="import-status" class="inline-tool-note" aria-live="polite"></div></section>
-        <section class="panel detail-panel hidden" id="result-detail"><div class="panel-heading"><div><h3 id="result-detail-title">Experiment details</h3><p id="result-detail-subtitle"></p></div><button class="icon-button" id="close-result-detail" aria-label="Close experiment detail">×</button></div><div id="result-detail-content"></div></section>
+      <section class="result-block history-block">
+        <div class="result-title"><div><h3>Saved experiment history</h3><p>Stored locally by this dashboard. Select a run to inspect its recorded configuration and results.</p></div><button class="button button-quiet" id="refresh-history" type="button">Refresh history</button></div>
+        <div class="table-scroll"><table><thead><tr><th>Run</th><th>Type</th><th>Models</th><th>Status</th><th>Created</th><th></th></tr></thead><tbody id="history-rows"><tr><td colspan="6" class="empty">Loading saved runs…</td></tr></tbody></table></div>
+        <details class="raw-details hidden" id="run-detail"><summary id="run-detail-title">Run details</summary><pre id="run-detail-json"></pre></details>
       </section>
+    </section>
 
-      <section class="page" id="page-hardware" data-title="Hardware telemetry">
-        <div class="page-heading"><div><div class="eyebrow"><span class="eyebrow-line"></span> DEVICE OBSERVABILITY</div><h1>Hardware telemetry<span class="title-period">.</span></h1><p class="page-description">Understand what the machine is doing while local inference runs.</p></div><span class="page-status-chip"><span class="status-dot"></span> 2 SECOND SAMPLING</span></div>
-        <div class="metric-grid hardware-metric-grid"><article class="metric-card"><div class="metric-top"><span>CPU utilization</span><span class="metric-symbol symbol-green">▦</span></div><div class="metric-value"><span id="hardware-cpu">—</span><small>%</small></div><div class="metric-sub">System-wide</div></article><article class="metric-card"><div class="metric-top"><span>System RAM</span><span class="metric-symbol symbol-blue">▧</span></div><div class="metric-value"><span id="hardware-ram">—</span><small>GB</small></div><div class="metric-sub" id="hardware-ram-sub">Total used</div></article><article class="metric-card"><div class="metric-top"><span>GPU utilization</span><span class="metric-symbol symbol-lilac">⌁</span></div><div class="metric-value"><span id="hardware-gpu">—</span><small>%</small></div><div class="metric-sub" id="hardware-gpu-sub">Device-wide</div></article><article class="metric-card"><div class="metric-top"><span>GPU power</span><span class="metric-symbol symbol-amber">ϟ</span></div><div class="metric-value"><span id="hardware-power">—</span><small>W</small></div><div class="metric-sub" id="hardware-power-sub">Instantaneous GPU power</div></article></div>
-        <div class="overview-columns hardware-charts"><section class="panel"><div class="panel-heading"><div><h3>CPU & GPU utilization</h3><p>Recent samples; polling may miss brief peaks</p></div></div><canvas id="hardware-resource-chart" class="main-chart" aria-label="Hardware utilization chart"></canvas></section><section class="panel"><div class="panel-heading"><div><h3>Memory usage</h3><p>RAM and VRAM</p></div></div><canvas id="memory-chart" class="main-chart" aria-label="Memory usage chart"></canvas></section></div>
-        <section class="panel"><div class="panel-heading"><div><h3>Measurement scope</h3><p>What these readings do and do not say</p></div></div><div class="scope-grid"><div><span class="scope-label">SYSTEM-WIDE</span><strong>CPU / RAM</strong><p>Includes Windows, browser, the dashboard and every other running application.</p></div><div><span class="scope-label">DEVICE-WIDE</span><strong>GPU / VRAM / power</strong><p>May include any application using the NVIDIA GPU. Do not attribute the total to Ollama alone.</p></div><div><span class="scope-label">RUNTIME-REPORTED</span><strong>Ollama allocation</strong><p>Reported model allocation is more directly related to Ollama but is not a per-layer trace.</p></div><div><span class="scope-label">PROCESS-LEVEL</span><strong>Ollama RSS / CPU</strong><p>Includes runtime overhead and may not precisely isolate one model or one inference request.</p></div></div></section>
-      </section>
-
-      <section class="page" id="page-integrations" data-title="Integrations">
-        <div class="page-heading"><div><div class="eyebrow"><span class="eyebrow-line"></span> LOCAL TOOLCHAIN</div><h1>Integrations<span class="title-period">.</span></h1><p class="page-description">Discover which local tools are available and what they contribute.</p></div><button class="button button-secondary" id="refresh-integrations">↻ Check again</button></div>
-        <div id="integrations-grid" class="integrations-grid"><div class="panel empty-state">Checking available tools…</div></div>
-        <div class="notice-card"><span class="info-icon">i</span><div><strong>Install only what you need</strong><p>Ollama and GPU telemetry are sufficient for the initial performance workflow. Promptfoo adds output checks; LM Evaluation Harness adds task benchmarks; llama-bench and Nsight are optional independent tools. External tools can have separate dependencies and measurement conditions.</p></div></div>
-      </section>
-
-      <footer class="app-footer"><span><span class="footer-orb"></span> LLM OBSERVATORY</span><span>Research prototype · Measurements include scope and limitations</span><span id="footer-clock">LOCAL SESSION</span></footer>
-    </main>
-  </div>
-
-  <div class="toast-region" id="toast-region" aria-live="polite"></div>
-  <div class="modal-backdrop hidden" id="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title"><div class="modal"><div class="modal-kicker">EXPERIMENT DETAIL</div><h2 id="modal-title">Saved experiment</h2><div id="modal-body"></div><div class="modal-actions"><button class="button button-secondary" id="modal-close">Close</button></div></div></div>
+    <section class="card limits">
+      <div class="section-head"><div><span class="step">!</span><div><h2>Measurement limits</h2><p>These constraints are part of the result, not footnotes to ignore.</p></div></div></div>
+      <div class="limit-grid">
+        <div><strong>Client timing</strong><p>TTFT and total latency include local request/runtime overhead. Prompt and generation throughput use Ollama-reported counts and durations.</p></div>
+        <div><strong>System and GPU</strong><p>CPU/RAM and NVIDIA GPU/VRAM/power/temperature are system- or device-wide samples, not isolated model consumption. Sampled peaks can miss brief spikes.</p></div>
+        <div><strong>Energy</strong><p>GPU joules are estimated by integrating power samples only when coverage is adequate. They are not whole-laptop energy or model-isolated energy; short requests may have no estimate.</p></div>
+        <div><strong>Quality</strong><p>Phrase assertions and normalized text agreement do not measure semantic similarity or establish a hallucination rate. Starter cases are not a validated benchmark dataset.</p></div>
+      </div>
+      <p class="protocol-link">See the <a href="https://github.com/dis-craft/LLM-observatory/blob/main/docs/benchmark-protocol.md" target="_blank" rel="noreferrer">benchmark protocol</a> and <a href="https://github.com/dis-craft/LLM-observatory/blob/main/docs/measurement-guide.md" target="_blank" rel="noreferrer">measurement guide</a>.</p>
+    </section>
+    <footer>LLM Observatory · Local research prototype · Every reported value includes its scope and limitations.</footer>
+  </main>
+  <div id="toast-region" class="toasts" aria-live="polite"></div>
 </body>
 </html>
