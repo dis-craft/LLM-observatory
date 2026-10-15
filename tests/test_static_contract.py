@@ -70,6 +70,13 @@ class StaticContractTests(unittest.TestCase):
         html_ids = set(re.findall(r'\bid="([^"]+)"', html))
         selector_ids = set(re.findall(r'\$\("#([A-Za-z0-9_-]+)"\)', javascript))
         self.assertFalse(selector_ids - html_ids, "JS selectors missing in HTML: " + ", ".join(sorted(selector_ids - html_ids)))
+    def test_reference_baseline_cannot_drift_from_selected_models(self):
+        javascript = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
+        html = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
+        self.assertIn('state.selected.add(state.baseline)', javascript)
+        self.assertIn('model.name === state.baseline && !check.checked', javascript)
+        self.assertIn('state.models.some((model) => model.name === state.baseline)', javascript)
+        self.assertIn('without subtracting idle power', html)
     def test_benchmark_protocol_documents_workload_basis(self):
         protocol = (ROOT / "docs" / "benchmark-protocol.md").read_text(encoding="utf-8")
         self.assertIn("Reference", protocol)
