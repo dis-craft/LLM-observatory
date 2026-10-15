@@ -33,9 +33,9 @@
 | Model-load duration | load_duration / 1e9 | Runtime-reported seconds |
 | Time to first token (TTFT) | Client time.perf_counter() at request start to first non-empty streamed content chunk | Client-observed seconds; includes local request/runtime delays |
 | End-to-end stream latency | Client time.perf_counter() at request start to full stream completion | Client-observed seconds |
-| Median / mean / p95 latency | Summary statistics over successful measured requests | A run's observed latency distribution |
+| Median / mean / standard deviation / p95 latency | Summary statistics over successful measured requests | Overall standard deviation mixes prompt difficulty with repetition noise |\n| Within-prompt standard deviation | Average of per-prompt population standard deviations where at least two repeated observations exist | A better indication of run-to-run spread for a fixed prompt; not computed with one repetition |
 | Median TTFT / prompt tok/s / generation tok/s | Median of valid values from successful requests | A run's observed distribution |
-| Sampled peak RAM / VRAM | Maximum system RAM or device VRAM value among telemetry samples observed during that request's time window | Sampled system/device peak, not model-only peak |
+| Sampled peak RAM / VRAM | Maximum system RAM or device VRAM value among telemetry samples observed during that request's time window | Sampled system/device peak, not model-only peak |\n| Sampled peak CPU / GPU utilization, GPU power, temperature and SM clock | Maximum values among telemetry samples observed during the request | Whole-system or device-wide sampled values; can miss brief peaks |\n| Sampled Ollama process RSS / CPU and runtime allocation | Maximum values among in-window telemetry samples where reported | Runtime/process diagnostic; includes runtime overhead and is not exact model-weight-only memory |
 | Telemetry sample count during request | Count of periodic sampler records timestamped within the request window | Indicates whether the sampling window captured any readings |
 | Reference pass rate | Passed native assertions divided by all attempted trials; failed requests count as failures | Depends on reference dataset and assertion rule; not general factuality |
 | Normalized exact-reference-match rate | Output and expected text compared after case, punctuation and whitespace normalization | Exact-text metric, not semantic equivalence |
@@ -66,7 +66,7 @@ All Ollama duration fields are reported in nanoseconds; the app converts to seco
 - **TTFT** = first-content-chunk time − request-start time
 - **Client latency** = stream-end time − request-start time
 - **Percentage change from reference baseline** = (model metric − baseline metric) / abs(baseline metric) × 100%. Negative latency change is an improvement; positive tokens/second change is an improvement. Interpret all other metrics using their own better/worse direction.
-- Per-model summaries include completed trial count, median/mean/p95 client latency, median TTFT, and median/mean prompt and generation throughput where values are available.
+- Per-model summaries include attempted/completed/failed counts, median/mean/standard deviation/p95 client latency, median TTFT, standard deviation and within-prompt standard deviation where repeat counts allow it, plus median/mean prompt and generation throughput.
 
 Runtime-reported total_duration and client-observed client_latency_s are kept as separate fields because their start/end boundaries differ.
 
@@ -79,7 +79,7 @@ Runtime-reported total_duration and client-observed client_latency_s are kept as
 - **TTFT is client-observed.** It includes local HTTP setup, queueing/scheduling, model-loading time if incurred, and runtime delay. It is not GPU-kernel start time.
 - **GPU energy is a sampled estimate, not an exact meter.** The runner uses trapezoidal integration over timestamped device-wide `nvidia-smi` power samples. It emits an estimate only when there are at least two samples inside the request window and at least 80% time coverage across adjacent sample intervals. Other GPU workloads still contribute; short requests may have no estimate. This is not whole-laptop energy or isolated model energy.
 - **Native quality checks now run without Promptfoo.** The built-in evaluator repeats each case, scores contains/equals/not-contains reference assertions, computes normalized exact-reference matches and compares each variant against the configured baseline model. It reports repeat consistency as exact normalized-text consistency, not semantic similarity. The scoring set must be curated and validated by the researcher.
-- **Warm-up and model residency matter.** Ollama can keep models loaded. Control cold/warm conditions explicitly, check ollama ps, and avoid interpreting a warm run as a cold-start measurement. The current runner does not force a clean unload between variants.
+- **Warm-up and model residency matter.** Ollama can keep models loaded. The runner warms each model and does not force a clean unload between variants; report model-load duration as the runtime value observed during measured requests, not as a controlled cold-start measurement.
 - **Other applications can contaminate the result.** Minimize background work; record system state; repeat runs. A before/after difference is an observed association, not exact model-only attribution.
 - **Observer overhead exists.** The telemetry sampler runs during the workload and consumes some resources.
 - **Different runtimes are not interchangeable.** llama-bench measures llama.cpp, not the exact Ollama backend. Keep backend, version, GPU-offload and build settings with any imported result.
