@@ -493,8 +493,32 @@ def add_baseline_comparisons(
 
 
 def summarize_trials(trials: list[dict[str, Any]]) -> dict[str, Any]:
+    successful = [row for row in trials if row.get("status", "completed") == "completed"]
+
     def vals(key: str) -> list[float]:
-        return [float(row[key]) for row in trials if isinstance(row.get(key), (int, float)) and math.isfinite(float(row[key]))]
+        return [
+            float(row[key]) for row in successful
+            if isinstance(row.get(key), (int, float)) and math.isfinite(float(row[key]))
+        ]
+
+    def mean(values: list[float]) -> float | None:
+        return statistics.mean(values) if values else None
+
+    def median(values: list[float]) -> float | None:
+        return statistics.median(values) if values else None
+
+    def stddev(values: list[float]) -> float | None:
+        # Do not imply a measured variability estimate from a single trial.
+        return statistics.pstdev(values) if len(values) >= 2 else None
+
+    def cv_pct(values: list[float]) -> float | None:
+        if len(values) < 2:
+            return None
+        average = statistics.mean(values)
+        if average == 0:
+            return None
+        return statistics.pstdev(values) / abs(average) * 100.0
+
     latencies = vals("client_latency_s")
     generation_speed = vals("generation_tokens_per_second")
     prompt_speed = vals("prompt_tokens_per_second")
@@ -506,27 +530,44 @@ def summarize_trials(trials: list[dict[str, Any]]) -> dict[str, Any]:
     load_durations = vals("model_load_duration_s")
     sampled_vram = vals("peak_sampled_vram_mb")
     sampled_ram = vals("peak_sampled_ram_bytes")
+    sampled_cpu = vals("peak_sampled_cpu_utilization_pct")
+    sampled_gpu = vals("peak_sampled_gpu_utilization_pct")
+    sampled_gpu_power = vals("peak_sampled_gpu_power_w")
+    sampled_gpu_temp = vals("peak_sampled_gpu_temperature_c")
     gpu_energy = vals("gpu_energy_j_estimate")
     return {
-        "completed_trials": len(trials),
-        "latency_median_s": statistics.median(latencies) if latencies else None,
+        "attempted_trials": len(trials),
+        "completed_trials": len(successful),
+        "failed_trials": len(trials) - len(successful),
+        "latency_median_s": median(latencies),
+        "latency_mean_s": mean(latencies),
+        "latency_stddev_s": stddev(latencies),
+        "latency_cv_pct": cv_pct(latencies),
         "latency_p95_s": quantile(latencies, 0.95),
-        "latency_mean_s": statistics.mean(latencies) if latencies else None,
-        "ttft_median_s": statistics.median(ttft) if ttft else None,
-        "generation_tokens_per_second_median": statistics.median(generation_speed) if generation_speed else None,
-        "prompt_tokens_per_second_median": statistics.median(prompt_speed) if prompt_speed else None,
-        "generation_tokens_per_second_mean": statistics.mean(generation_speed) if generation_speed else None,
-        "prompt_tokens_median": statistics.median(prompt_counts) if prompt_counts else None,
-        "output_tokens_median": statistics.median(output_counts) if output_counts else None,
-        "prompt_processing_duration_median_s": statistics.median(prompt_durations) if prompt_durations else None,
-        "generation_duration_median_s": statistics.median(generation_durations) if generation_durations else None,
-        "model_load_duration_median_s": statistics.median(load_durations) if load_durations else None,
+        "ttft_median_s": median(ttft),
+        "ttft_stddev_s": stddev(ttft),
+        "generation_tokens_per_second_median": median(generation_speed),
+        "generation_tokens_per_second_mean": mean(generation_speed),
+        "generation_tokens_per_second_stddev": stddev(generation_speed),
+        "generation_tokens_per_second_cv_pct": cv_pct(generation_speed),
+        "prompt_tokens_per_second_median": median(prompt_speed),
+        "prompt_tokens_per_second_mean": mean(prompt_speed),
+        "prompt_tokens_per_second_stddev": stddev(prompt_speed),
+        "prompt_tokens_median": median(prompt_counts),
+        "output_tokens_median": median(output_counts),
+        "prompt_processing_duration_median_s": median(prompt_durations),
+        "generation_duration_median_s": median(generation_durations),
+        "model_load_duration_median_s": median(load_durations),
         "peak_sampled_vram_mb": max(sampled_vram) if sampled_vram else None,
         "peak_sampled_system_ram_bytes": max(sampled_ram) if sampled_ram else None,
-        "gpu_energy_j_median_estimate": statistics.median(gpu_energy) if gpu_energy else None,
-        "gpu_energy_j_mean_estimate": statistics.mean(gpu_energy) if gpu_energy else None,
+        "peak_sampled_cpu_utilization_pct": max(sampled_cpu) if sampled_cpu else None,
+        "peak_sampled_gpu_utilization_pct": max(sampled_gpu) if sampled_gpu else None,
+        "peak_sampled_gpu_power_w": max(sampled_gpu_power) if sampled_gpu_power else None,
+        "peak_sampled_gpu_temperature_c": max(sampled_gpu_temp) if sampled_gpu_temp else None,
+        "gpu_energy_j_median_estimate": median(gpu_energy),
+        "gpu_energy_j_mean_estimate": mean(gpu_energy),
         "gpu_energy_estimated_trials": len(gpu_energy),
-        "gpu_energy_total_completed_trials": len(trials),
+        "gpu_energy_total_completed_trials": len(successful),
     }
 
 
