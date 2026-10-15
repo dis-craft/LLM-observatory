@@ -48,8 +48,15 @@ class StaticContractTests(unittest.TestCase):
         javascript = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
         self.assertIn('id="quality-baseline"', html)
         self.assertIn('id="quality-repetitions"', html)
+        self.assertIn('id="performance-baseline"', html)
+        self.assertIn('id="workload-profile"', html)
+        self.assertIn('value="prefill"', html)
+        self.assertIn('value="decode"', html)
+        self.assertIn('value="retrieval"', html)
         self.assertIn('/api/evaluations/native', javascript)
         self.assertIn('baseline_model: baselineModel', javascript)
+        self.assertIn('baseline_model: $("#performance-baseline").value', javascript)
+        self.assertIn('change_percent_vs_baseline', javascript)
 
     def test_experiment_storage_is_local_and_ignored(self):
         gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
