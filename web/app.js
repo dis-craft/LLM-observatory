@@ -380,7 +380,8 @@
 
   function kindLabel(kind) {
     return ({
-      performance: "Performance",
+      performance: "Performance benchmark",
+      native_quality: "Quality benchmark",
       promptfoo: "Promptfoo quality",
       lm_eval: "LM Evaluation",
       imported_benchmark: "Imported result"
@@ -400,6 +401,11 @@
       const firstModel = Object.keys(result.summary_by_model)[0];
       const summary = firstModel ? result.summary_by_model[firstModel] : {};
       return (summary.generation_tokens_per_second_median != null ? fmtNumber(summary.generation_tokens_per_second_median, 2) + " tok/s median" : "Performance run");
+    }
+    if (experiment.kind === "native_quality" && result.summary_by_model) {
+      const firstModel = Object.keys(result.summary_by_model)[0];
+      const summary = firstModel ? result.summary_by_model[firstModel] : {};
+      return summary.assertion_pass_rate == null ? "Quality run" : fmtNumber(summary.assertion_pass_rate * 100, 1) + "% reference pass";
     }
     if (experiment.kind === "promptfoo") {
       return result.report_available ? "Report saved" : (experiment.status === "completed" ? "Evaluator completed" : "Quality checks");
@@ -468,11 +474,12 @@
       const available = Boolean(status.available);
       return '<article class="panel integration-feature"><div class="integration-feature-top"><span class="integration-logo">' + escapeHtml(info.group.slice(0, 2)) + '</span><span class="availability-chip ' + (available ? "available" : "unavailable") + '">' + (available ? "AVAILABLE" : "NOT DETECTED") + '</span></div><h3>' + escapeHtml(info.title) + '</h3><p>' + escapeHtml(info.purpose) + '</p><div class="inline-tool-note">' + (available ? "Detected on this machine." : "Setup: " + escapeHtml(status.install || info.install)) + '</div></article>';
     }).join("");
-    const promptfoo = data.promptfoo || {};
-    const promptReady = promptfoo.available || promptfoo.npx_available;
-    $("#promptfoo-chip").textContent = promptReady ? "PROMPTFOO AVAILABLE" : "PROMPTFOO NOT INSTALLED";
-    $("#promptfoo-chip").classList.toggle("available", promptReady);
-    $("#promptfoo-chip").classList.toggle("unavailable", !promptReady);
+    const qualityChip = $("#promptfoo-chip");
+    if (qualityChip) {
+      qualityChip.textContent = "BUILT-IN EVALUATOR";
+      qualityChip.classList.add("available");
+      qualityChip.classList.remove("unavailable");
+    }
     const lmEval = data.lm_eval || {};
     $("#lm-eval-status").textContent = lmEval.available ? "Available" : "Not installed";
     $("#lm-eval-status").classList.toggle("available", Boolean(lmEval.available));
@@ -513,13 +520,22 @@
     target.classList.remove("hidden");
     const result = experiment.result || {};
     let body = "";
-    if (experiment.kind === "performance" && result.summary_by_model) {
+    if (experiment.kind === "native_quality" && result.summary_by_model) {
+      body += '<p class="inline-tool-note">Baseline: ' + escapeHtml(shortModel(result.baseline_model || "")) + '. Exact agreement compares normalized text, not meaning. Reference pass rate is only as strong as the assertions and dataset.</p><div class="result-kpis">';
+      Object.keys(result.summary_by_model).forEach(function (model) {
+        const m = result.summary_by_model[model];
+        const pct = (value) => value == null ? "—" : fmtNumber(value * 100, 1) + "%";
+        body += '<div class="result-kpi"><span>' + escapeHtml(shortModel(model)) + '</span><strong>' + pct(m.assertion_pass_rate) + ' pass</strong><span>Exact reference match ' + pct(m.reference_exact_match_rate) + '</span><span>Baseline agreement ' + pct(m.baseline_exact_agreement_rate) + '</span><span>Repeat consistency ' + pct(m.repeat_consistency_rate) + '</span><span>Failed requests ' + (m.failed_trials == null ? "—" : m.failed_trials) + '</span></div>';
+      });
+      body += '</div><p class="inline-tool-note">' + (result.trials ? result.trials.length : 0) + ' quality trial(s). Repeat consistency is unavailable for single-run tests. Run quality and performance benchmarks separately.</p>';
+      if (result.trials) body += '<details class="job-log"><summary>View answer-by-answer results</summary><pre>' + escapeHtml(JSON.stringify(result.trials, null, 2)) + '</pre></details>';
+    } else if (experiment.kind === "performance" && result.summary_by_model) {
       body += '<div class="result-kpis">';
       Object.keys(result.summary_by_model).forEach(function (model) {
         const metrics = result.summary_by_model[model];
         body += '<div class="result-kpi"><span>' + escapeHtml(shortModel(model)) + ' · MEDIAN GENERATION</span><strong>' + (metrics.generation_tokens_per_second_median == null ? "—" : fmtNumber(metrics.generation_tokens_per_second_median, 2) + " tok/s") + '</strong><span>Median latency ' + (metrics.latency_median_s == null ? "—" : fmtNumber(metrics.latency_median_s, 2) + " s") + '</span><span>TTFT ' + (metrics.ttft_median_s == null ? "—" : fmtNumber(metrics.ttft_median_s, 2) + " s") + '</span></div>';
       });
-      body += '</div><p class="inline-tool-note">' + (result.trials ? result.trials.length : 0) + ' measured request(s). Memory is sampled and shared-device; energy is not measured. Open Results for full metrics.</p>';
+      body += '</div><p class="inline-tool-note">' + (result.trials ? result.trials.length : 0) + ' measured request(s). RAM/VRAM are sampled and shared-device. GPU energy is an estimate shown only when sample coverage is sufficient; it is not model-isolated or whole-laptop energy.</p>'; 
       if (result.errors && result.errors.length) body += '<pre>' + escapeHtml(JSON.stringify(result.errors, null, 2)) + '</pre>';
     } else if (experiment.kind === "promptfoo") {
       body += '<p class="inline-tool-note">' + (result.report_available ? "Promptfoo produced a report." : "Promptfoo ran without a parseable JSON report.") + ' Inspect the saved experiment for CLI logs and raw evaluation data.</p>';
@@ -640,16 +656,22 @@
     if (!models.length) { showToast("Select at least one model variant.", "error"); return; }
     let cases;
     try { cases = parseQualityCases(); } catch (error) { showToast(error.message, "error"); return; }
-    setSubmitState(button, true, "✓ Run quality checks");
+    setSubmitState(button, true, "✓ Run quality benchmark");
     try {
-      const response = await api("/api/evaluations/promptfoo", {
+      const repetitions = Number($("#quality-repetitions").value);
+      if (models.length * cases.length * repetitions > 500) {
+        showToast("This run would exceed 500 requests. Reduce models, cases or repetitions.", "error");
+        return;
+      }
+      const response = await api("/api/evaluations/native", {
         method: "POST",
         body: JSON.stringify({
-          models: models, cases: cases, temperature: Number($("#quality-temperature").value),
+          models: models, cases: cases, repetitions: repetitions,
+          temperature: Number($("#quality-temperature").value),
           context_length: Number($("#quality-context").value), max_tokens: Number($("#quality-output").value)
         })
       });
-      showJob("quality", "Promptfoo quality evaluation", cases.length + " cases across " + models.length + " model(s)", response.experiment_id);
+      showJob("quality", "Quality benchmark", cases.length + " cases × " + repetitions + " repetitions across " + models.length + " model(s)", response.experiment_id);
       watchJob(response.experiment_id, "quality");
     } catch (error) {
       showToast(error.message, "error");
