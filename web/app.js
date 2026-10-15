@@ -434,7 +434,7 @@
       (config.warmups == null ? "—" : config.warmups) + " warm-up(s) per model. " +
       (env.ollama_version ? "Ollama " + env.ollama_version + ". " : "") +
       (gpu.name ? "GPU: " + gpu.name + ". " : "NVIDIA power telemetry may be unavailable. ") +
-      "Run order is serial; repeated runs can still be affected by temperature and background activity.";
+      "Models are paired by prompt/repetition with alternating order. Temperature and background activity can still affect results.";
 
     const models = env.models || [];
     const modelInfo = Object.fromEntries(models.map((m) => [m.name, m]));
@@ -444,22 +444,23 @@
       const base = model === baseline;
       return '<tr' + (base ? ' class="baseline-row"' : '') + '>' +
         '<td><strong>' + escapeHtml(model) + '</strong><small>' + escapeHtml(info.quantization_level || "Quantization not reported") + (info.size_bytes == null ? "" : " · " + bytes(info.size_bytes)) + (base ? " · BASELINE" : "") + '</small></td>' +
-        '<td><strong>' + number(m.generation_tokens_per_second_median, 2) + ' tok/s</strong><small>' + (m.generation_tokens_per_second_stddev == null ? "SD unavailable" : "SD " + number(m.generation_tokens_per_second_stddev, 2)) + ' · ' + relativeChange(m, "generation_tokens_per_second_median") + ' vs baseline</small></td>' +
+        '<td><strong>' + number(m.generation_tokens_per_second_median, 2) + ' tok/s</strong><small>Overall SD ' + number(m.generation_tokens_per_second_stddev, 2) + '</small><small>Within-prompt SD ' + number(m.generation_tokens_per_second_within_prompt_stddev_mean, 2) + '</small><small>' + relativeChange(m, "generation_tokens_per_second_median") + ' vs baseline</small></td>' +
         '<td><strong>' + number(m.prompt_tokens_per_second_median, 2) + ' tok/s</strong><small>' + relativeChange(m, "prompt_tokens_per_second_median") + ' vs baseline</small></td>' +
-        '<td><strong>' + number(m.latency_median_s, 3) + ' s</strong><small>SD ' + number(m.latency_stddev_s, 3) + ' · ' + relativeChange(m, "latency_median_s") + '</small><small>p95 ' + number(m.latency_p95_s, 3) + ' s</small></td>' +
-        '<td><strong>' + number(m.ttft_median_s, 3) + ' s</strong><small>SD ' + number(m.ttft_stddev_s, 3) + ' · ' + relativeChange(m, "ttft_median_s") + '</small></td>' +
+        '<td><strong>' + number(m.latency_median_s, 3) + ' s</strong><small>Overall SD ' + number(m.latency_stddev_s, 3) + '</small><small>Within-prompt SD ' + number(m.latency_within_prompt_stddev_mean_s, 3) + '</small><small>p95 ' + number(m.latency_p95_s, 3) + ' s · ' + relativeChange(m, "latency_median_s") + '</small></td>' +
+        '<td><strong>' + number(m.ttft_median_s, 3) + ' s</strong><small>Overall SD ' + number(m.ttft_stddev_s, 3) + '</small><small>Within-prompt SD ' + number(m.ttft_within_prompt_stddev_mean_s, 3) + '</small><small>' + relativeChange(m, "ttft_median_s") + ' vs baseline</small></td>' +
         '<td><strong>' + number(m.prompt_tokens_median, 0) + ' / ' + number(m.output_tokens_median, 0) + '</strong><small>input / output tokens</small></td>' +
         '<td><strong>' + (m.peak_sampled_vram_mb == null ? "—" : number(m.peak_sampled_vram_mb, 0) + " MB") + '</strong><small>' + relativeChange(m, "peak_sampled_vram_mb") + ' vs baseline</small></td>' +
         '<td><strong>' + bytes(m.peak_sampled_system_ram_bytes) + '</strong><small>system-wide peak · ' + relativeChange(m, "peak_sampled_system_ram_bytes") + '</small></td>' +
         '<td><strong>' + number(m.peak_sampled_cpu_utilization_pct, 0) + '%</strong><small>system-wide peak sample</small></td>' +
-        '<td><strong>' + number(m.peak_sampled_gpu_utilization_pct, 0) + '%</strong><small>peak sampled</small><small>' + number(m.peak_sampled_gpu_power_w, 1) + ' W · ' + number(m.peak_sampled_gpu_temperature_c, 0) + ' °C</small></td>' +
+        '<td><strong>' + number(m.peak_sampled_gpu_utilization_pct, 0) + '%</strong><small>peak sampled</small><small>' + number(m.peak_sampled_gpu_power_w, 1) + ' W · ' + number(m.peak_sampled_gpu_temperature_c, 0) + ' °C</small><small>SM clock ' + number(m.peak_sampled_gpu_sm_clock_mhz, 0) + ' MHz</small></td>' +
+        '<td><strong>' + bytes(m.peak_sampled_ollama_rss_bytes) + ' RSS</strong><small>Process CPU peak ' + number(m.peak_sampled_ollama_cpu_pct, 0) + '%</small><small>Runtime allocation ' + bytes(m.peak_sampled_ollama_allocation_bytes) + '</small><small>Runtime VRAM alloc ' + bytes(m.peak_sampled_ollama_vram_allocation_bytes) + '</small><small>RSS change ' + relativeChange(m, "peak_sampled_ollama_rss_bytes") + '</small></td>' +
         '<td><strong>' + (m.gpu_energy_j_median_estimate == null ? "Unavailable" : number(m.gpu_energy_j_median_estimate, 2) + " J") + '</strong><small>' + (m.gpu_energy_estimated_trials == null ? "0" : m.gpu_energy_estimated_trials) + "/" + (m.gpu_energy_total_completed_trials == null ? "0" : m.gpu_energy_total_completed_trials) + " trials with estimate</small><small>' + relativeChange(m, "gpu_energy_j_median_estimate") + ' vs baseline</small></td>' +
         '<td><strong>' + number(m.completed_trials, 0) + '/' + number(m.attempted_trials, 0) + '</strong><small>' + number(m.failed_trials, 0) + ' failed</small><small>Load median ' + number(m.model_load_duration_median_s, 3) + ' s</small></td>' +
         '</tr>';
     }).join("");
 
     $("#performance-results").innerHTML =
-      '<div class="table-scroll"><table class="results-table"><thead><tr><th>Model</th><th>Generation</th><th>Prompt processing</th><th>End-to-end latency</th><th>TTFT</th><th>Median tokens</th><th>Sampled VRAM peak</th><th>Sampled RAM peak</th><th>Sampled CPU peak</th><th>Sampled GPU peak</th><th>GPU energy estimate</th><th>Trials / loading</th></tr></thead><tbody>' +
+      '<div class="table-scroll"><table class="results-table"><thead><tr><th>Model</th><th>Generation</th><th>Prompt processing</th><th>End-to-end latency</th><th>TTFT</th><th>Median tokens</th><th>Sampled VRAM peak</th><th>Sampled RAM peak</th><th>Sampled CPU peak</th><th>Sampled GPU peak</th><th>Ollama runtime resources</th><th>GPU energy estimate</th><th>Trials / loading</th></tr></thead><tbody>' +
       rows + '</tbody></table></div>' +
       '<p class="result-note">Percentage changes are raw numerical changes from the selected baseline. Negative latency change is usually better; positive tokens/s change is usually better. RAM/VRAM and GPU readings are sampled system/device measurements; energy is a device-wide estimate only where sample coverage passes the threshold.</p>' +
       '<details class="raw-details"><summary>Protocol, environment and raw trial data</summary><pre>' + escapeHtml(JSON.stringify({
