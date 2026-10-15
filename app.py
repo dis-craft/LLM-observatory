@@ -283,7 +283,7 @@ def tool_status() -> dict[str, Any]:
 
 def normalize_answer(value: str) -> str:
     """Normalize casing, punctuation and whitespace for exact-text comparisons."""
-    return " ".join(re.sub(r"[^\w\s]", "", (value or "").casefold()).split())
+    return " ".join(re.sub(r"[^\w\s]", " ", (value or "").casefold()).split())
 
 
 def reference_assertion_passes(output: str, expected: str, assertion: str) -> bool:
@@ -722,7 +722,7 @@ def native_quality_worker(experiment_id: str, config: dict[str, Any]) -> dict[st
                 db_update(experiment_id, progress=min(99, len(trials) / max(total, 1) * 100))
     return {
         "config": config,
-        "baseline_model": config["models"][0],
+        "baseline_model": config["baseline_model"],
         "summary_by_model": summarize_quality_trials(
             trials, config["models"], len(config["cases"]), config["repetitions"], config["baseline_model"]
         ),
